@@ -7,7 +7,7 @@
 <title>Госпиталь: запись отправки</title>
 <style>
   html{background:#f4efe3;min-height:100%}
-  body{font-family:system-ui,sans-serif;margin:0;padding:16px 16px 60px;background:#f4efe3;color:#222;min-height:100vh;max-width:520px;margin-inline:auto}
+  body{font-family:system-ui,sans-serif;margin:0 auto;padding:16px 16px 60px;background:#f4efe3;color:#222;min-height:100vh;max-width:520px}
   h1{font-size:20px;margin:0 0 8px}
   h3{margin:20px 0 6px;font-size:16px}
   label{display:block;margin:12px 0 4px;font-size:14px;color:#555}
@@ -24,6 +24,7 @@
 </head>
 <body>
 <h1>Запись отправки на госпиталь</h1>
+<div id="status" class="small" style="color:#a33"></div>
 
 <div id="tokenBox" hidden>
   <label>Секретный код альянса</label>
@@ -95,9 +96,10 @@ function load() {
   if (!token) return askToken('');
   $('tokenBox').hidden = true;
   $('main').hidden = false;
+  $('status').textContent = 'Загрузка…';
   api({ action: 'data', token, player: $('player').value || lsGet('player') })
-    .then(render)
-    .catch(e => msg('Ошибка: ' + e.message));
+    .then(d => { $('status').textContent = ''; render(d); })
+    .catch(e => { $('status').textContent = 'Ошибка: ' + e.message; });
 }
 
 function render(d) {
@@ -157,10 +159,15 @@ $('send').onclick = () => {
   if (!player || !rec || !total) return msg('Выберите ник, заявку и введите сумму');
   lsSet('player', player);
   $('send').disabled = true;
+  msg('Записываю…');
   api({ action: 'save', token, player, recipient: rec, total })
     .then(r => {
       $('send').disabled = false;
-      if (r.status === 'ok') { msg('Записано: +' + fmt(total) + ' → ' + rec); $('total').value = ''; load(); }
+      if (r.status === 'ok') {
+        msg('Записано: +' + fmt(total) + ' → ' + rec);
+        $('total').value = '';
+        render(r.data);
+      }
       else if (r.status === 'forbidden') askToken('Неверный секретный код');
       else msg('Ошибка: ' + r.status);
     })
@@ -178,8 +185,12 @@ $('undo').onclick = () => {
     return;
   }
   armed = false; $('undo').textContent = UNDO_TEXT;
+  msg('Отменяю…');
   api({ action: 'undo', token, player })
-    .then(r => { msg(r.status === 'ok' ? 'Последняя запись отменена' : 'Ошибка: ' + r.status); load(); })
+    .then(r => {
+      msg(r.status === 'ok' ? 'Последняя запись отменена' : 'Ошибка: ' + r.status);
+      if (r.data) render(r.data);
+    })
     .catch(e => msg('Ошибка: ' + e.message));
 };
 

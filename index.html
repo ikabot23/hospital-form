@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4efe3">
+<title>Госпиталь: запись отправки</title>
+<style>
+  html{background:#f4efe3;min-height:100%}
+  body{font-family:system-ui,sans-serif;margin:0;padding:16px 16px 60px;background:#f4efe3;color:#222;min-height:100vh;max-width:520px;margin-inline:auto}
+  h1{font-size:20px;margin:0 0 8px}
+  h3{margin:20px 0 6px;font-size:16px}
+  label{display:block;margin:12px 0 4px;font-size:14px;color:#555}
+  select,input,button{width:100%;box-sizing:border-box;font-size:18px;padding:12px;border-radius:8px;border:1px solid #999}
+  button{background:#4a7c1f;color:#fff;border:0;margin-top:16px}
+  button:disabled{opacity:.5}
+  button.sec{background:#fff;color:#a33;border:1px solid #a33;margin-top:10px;font-size:15px}
+  .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
+  .bar{height:8px;background:#ddd;border-radius:4px;overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;background:#4a7c1f}
+  .small{font-size:13px;color:#666;margin-top:4px}
+  #msg{margin-top:12px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>Запись отправки на госпиталь</h1>
+
+<div id="tokenBox" hidden>
+  <label>Секретный код альянса</label>
+  <input id="token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+  <div id="tokMsg" class="small" style="color:#a33"></div>
+  <button id="tokenSave">Сохранить код</button>
+</div>
+
+<div id="main" hidden>
+  <label>Ваш ник</label>
+  <select id="player"></select>
+
+  <label>Получатель (заявка)</label>
+  <select id="recipient"></select>
+  <div id="info" class="small"></div>
+
+  <label>Сумма (все ресурсы вместе, как «Всего» в игре)</label>
+  <input id="total" type="text" inputmode="numeric" placeholder="например 333000">
+
+  <button id="send">Записать</button>
+  <div id="msg"></div>
+
+  <h3>Мои последние записи</h3>
+  <div id="recent"></div>
+  <button class="sec" id="undo">Отменить последнюю запись</button>
+
+  <h3>Заявки</h3>
+  <div id="reqs"></div>
+</div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbybaEsJASUwtW11fnkG6_yzwBm0QVGnyJ9E0I7_Pvr0qrNVhBh0AA8b6DcbGDrRTi86cg/exec';
+
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('ru-RU');
+const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+let token = lsGet('token');
+let data = null;
+
+function msg(t) { $('msg').textContent = t; }
+
+async function api(body) {
+  const r = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body)
+  });
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error('сервер вернул не данные: ' + text.slice(0, 80)); }
+}
+
+function askToken(text) {
+  token = ''; lsSet('token', '');
+  $('tokMsg').textContent = text || '';
+  $('tokenBox').hidden = false;
+  $('main').hidden = true;
+}
+
+function fillSelect(sel, items, cur, placeholder) {
+  sel.innerHTML = '';
+  sel.add(new Option(placeholder, ''));
+  items.forEach(it => sel.add(new Option(it.label, it.value)));
+  sel.value = cur;
+}
+
+function load() {
+  if (!token) return askToken('');
+  $('tokenBox').hidden = true;
+  $('main').hidden = false;
+  api({ action: 'data', token, player: $('player').value || lsGet('player') })
+    .then(render)
+    .catch(e => msg('Ошибка: ' + e.message));
+}
+
+function render(d) {
+  if (d.error) return askToken('Неверный секретный код (версия сервера ' + d.ver + ')');
+  data = d;
+  const curP = $('player').value || lsGet('player');
+  const curR = $('recipient').value;
+  fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— выберите ник —');
+  fillSelect($('recipient'),
+    d.requests.map(r => ({ label: r.name + ' (осталось ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
+    curR, '— выберите заявку —');
+  showInfo();
+
+  const rc = $('recent'); rc.innerHTML = '';
+  if (!d.recent.length) rc.innerHTML = '<div class="small">Пока нет записей</div>';
+  d.recent.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.textContent = r.time + ' → ' + r.to + ': ' + fmt(r.total);
+    rc.appendChild(div);
+  });
+
+  const rq = $('reqs'); rq.innerHTML = '';
+  d.requests.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    const pct = r.need ? Math.min(100, Math.round(r.got / r.need * 100)) : 0;
+    div.textContent = r.name + ': ' + fmt(r.got) + ' из ' + fmt(r.need);
+    const bar = document.createElement('div'); bar.className = 'bar';
+    const i = document.createElement('i'); i.style.width = pct + '%';
+    bar.appendChild(i); div.appendChild(bar);
+    rq.appendChild(div);
+  });
+}
+
+function showInfo() {
+  const name = $('recipient').value;
+  const r = data && data.requests.find(x => x.name === name);
+  $('info').textContent = r ? 'Собрано ' + fmt(r.got) + ' из ' + fmt(r.need) +
+    ', осталось ' + fmt(Math.max(r.need - r.got, 0)) : '';
+}
+
+$('tokenSave').onclick = () => {
+  const t = $('token').value.replace(/[\s\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '');
+  if (!t) return;
+  token = t;
+  lsSet('token', t);
+  $('tokMsg').textContent = '';
+  load();
+};
+$('player').onchange = () => { lsSet('player', $('player').value); load(); };
+$('recipient').onchange = showInfo;
+
+$('send').onclick = () => {
+  const player = $('player').value, rec = $('recipient').value;
+  const total = Number($('total').value.replace(/\D/g, ''));
+  if (!player || !rec || !total) return msg('Выберите ник, заявку и введите сумму');
+  lsSet('player', player);
+  $('send').disabled = true;
+  api({ action: 'save', token, player, recipient: rec, total })
+    .then(r => {
+      $('send').disabled = false;
+      if (r.status === 'ok') { msg('Записано: +' + fmt(total) + ' → ' + rec); $('total').value = ''; load(); }
+      else if (r.status === 'forbidden') askToken('Неверный секретный код');
+      else msg('Ошибка: ' + r.status);
+    })
+    .catch(e => { $('send').disabled = false; msg('Ошибка: ' + e.message); });
+};
+
+let armed = false;
+const UNDO_TEXT = 'Отменить последнюю запись';
+$('undo').onclick = () => {
+  const player = $('player').value;
+  if (!player) return msg('Сначала выберите ник');
+  if (!armed) {
+    armed = true; $('undo').textContent = 'Нажмите ещё раз для отмены';
+    setTimeout(() => { armed = false; $('undo').textContent = UNDO_TEXT; }, 4000);
+    return;
+  }
+  armed = false; $('undo').textContent = UNDO_TEXT;
+  api({ action: 'undo', token, player })
+    .then(r => { msg(r.status === 'ok' ? 'Последняя запись отменена' : 'Ошибка: ' + r.status); load(); })
+    .catch(e => msg('Ошибка: ' + e.message));
+};
+
+load();
+</script>
+</body>
+</html>

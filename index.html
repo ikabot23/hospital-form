@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f4efe3">
-<title>Госпиталь: запись отправки</title>
+<title>Hospital: log your shipment</title>
 <style>
   html{background:#f4efe3;min-height:100%}
   body{font-family:system-ui,sans-serif;margin:0 auto;padding:16px 16px 60px;background:#f4efe3;color:#222;min-height:100vh;max-width:520px}
@@ -24,44 +24,55 @@
 </style>
 </head>
 <body>
-<h1>Запись отправки на госпиталь</h1>
+<h1>Log your hospital shipment</h1>
 <div id="status" class="small" style="color:#a33"></div>
 
 <div id="tokenBox" hidden>
-  <label>Секретный код альянса</label>
+  <label>Alliance secret code</label>
   <input id="token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
   <div id="tokMsg" class="small" style="color:#a33"></div>
-  <button id="tokenSave">Сохранить код</button>
+  <button id="tokenSave">Save code</button>
 </div>
 
 <div id="main" hidden>
-  <label>Ваш ник</label>
+  <label>Your nickname</label>
   <select id="player"></select>
 
-  <label>Получатель (заявка)</label>
+  <label>Recipient (request)</label>
   <select id="recipient"></select>
   <div id="info" class="small"></div>
   <div id="link"></div>
 
-  <label>Сумма (все ресурсы вместе, как «Всего» в игре)</label>
-  <input id="total" type="text" inputmode="numeric" placeholder="например 333000">
+  <label>Amount (all resources combined, same as “Total” in the game)</label>
+  <input id="total" type="text" inputmode="numeric" placeholder="e.g. 333000">
 
-  <button id="send">Записать</button>
+  <button id="send">Save shipment</button>
   <div id="msg"></div>
 
-  <h3>Мои последние записи</h3>
+  <h3>My recent entries</h3>
   <div id="recent"></div>
-  <button class="sec" id="undo">Отменить последнюю запись</button>
+  <button class="sec" id="undo">Undo last entry</button>
 
-  <h3>Заявки</h3>
+  <h3>Requests</h3>
   <div id="reqs"></div>
 </div>
 
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
 
+const ERR = {
+  'forbidden': 'Wrong secret code',
+  'no request': 'There is no request for this recipient',
+  'player not found': 'Your nickname was not found in the sheet',
+  'sheet not found': 'Sheet tab not found',
+  'bad amount': 'Enter a valid amount',
+  'nothing to undo': 'Nothing to undo',
+  'cell not found': 'Cell not found in the sheet'
+};
+const err = s => ERR[s] || s;
+
 const $ = id => document.getElementById(id);
-const fmt = n => Number(n).toLocaleString('ru-RU');
+const fmt = n => Number(n).toLocaleString('en-US');
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 let token = lsGet('token');
@@ -77,7 +88,7 @@ async function api(body) {
   });
   const text = await r.text();
   try { return JSON.parse(text); }
-  catch (e) { throw new Error('сервер вернул не данные: ' + text.slice(0, 80)); }
+  catch (e) { throw new Error('server returned no data: ' + text.slice(0, 80)); }
 }
 
 function askToken(text) {
@@ -98,25 +109,25 @@ function load() {
   if (!token) return askToken('');
   $('tokenBox').hidden = true;
   $('main').hidden = false;
-  $('status').textContent = 'Загрузка…';
+  $('status').textContent = 'Loading…';
   api({ action: 'data', token, player: $('player').value || lsGet('player') })
     .then(d => { $('status').textContent = ''; render(d); })
-    .catch(e => { $('status').textContent = 'Ошибка: ' + e.message; });
+    .catch(e => { $('status').textContent = 'Error: ' + e.message; });
 }
 
 function render(d) {
-  if (d.error) return askToken('Неверный секретный код (версия сервера ' + d.ver + ')');
+  if (d.error) return askToken('Wrong secret code (server version ' + d.ver + ')');
   data = d;
   const curP = $('player').value || lsGet('player');
   const curR = $('recipient').value;
-  fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— выберите ник —');
+  fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
   fillSelect($('recipient'),
-    d.requests.map(r => ({ label: r.name + ' (осталось ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
-    curR, '— выберите заявку —');
+    d.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
+    curR, '— select request —');
   showInfo();
 
   const rc = $('recent'); rc.innerHTML = '';
-  if (!d.recent.length) rc.innerHTML = '<div class="small">Пока нет записей</div>';
+  if (!d.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
   d.recent.forEach(r => {
     const div = document.createElement('div');
     div.className = 'card';
@@ -129,7 +140,7 @@ function render(d) {
     const div = document.createElement('div');
     div.className = 'card';
     const pct = r.need ? Math.min(100, Math.round(r.got / r.need * 100)) : 0;
-    div.textContent = r.name + ': ' + fmt(r.got) + ' из ' + fmt(r.need);
+    div.textContent = r.name + ': ' + fmt(r.got) + ' of ' + fmt(r.need);
     const bar = document.createElement('div'); bar.className = 'bar';
     const i = document.createElement('i'); i.style.width = pct + '%';
     bar.appendChild(i); div.appendChild(bar);
@@ -140,8 +151,8 @@ function render(d) {
 function showInfo() {
   const name = $('recipient').value;
   const r = data && data.requests.find(x => x.name === name);
-  $('info').textContent = r ? 'Собрано ' + fmt(r.got) + ' из ' + fmt(r.need) +
-    ', осталось ' + fmt(Math.max(r.need - r.got, 0)) : '';
+  $('info').textContent = r ? 'Collected ' + fmt(r.got) + ' of ' + fmt(r.need) +
+    ', remaining ' + fmt(Math.max(r.need - r.got, 0)) : '';
 
   const box = $('link');
   box.innerHTML = '';
@@ -150,7 +161,7 @@ function showInfo() {
     a.href = r.link;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = 'Открыть отправку ресурсов → ' + r.name;
+    a.textContent = 'Open send-resources page → ' + r.name;
     box.appendChild(a);
   }
 }
@@ -169,42 +180,42 @@ $('recipient').onchange = showInfo;
 $('send').onclick = () => {
   const player = $('player').value, rec = $('recipient').value;
   const total = Number($('total').value.replace(/\D/g, ''));
-  if (!player || !rec || !total) return msg('Выберите ник, заявку и введите сумму');
+  if (!player || !rec || !total) return msg('Select your nickname and a request, then enter an amount');
   lsSet('player', player);
   $('send').disabled = true;
-  msg('Записываю…');
+  msg('Saving…');
   api({ action: 'save', token, player, recipient: rec, total })
     .then(r => {
       $('send').disabled = false;
       if (r.status === 'ok') {
-        msg('Записано: +' + fmt(total) + ' → ' + rec);
+        msg('Saved: +' + fmt(total) + ' → ' + rec);
         $('total').value = '';
         render(r.data);
       }
-      else if (r.status === 'forbidden') askToken('Неверный секретный код');
-      else msg('Ошибка: ' + r.status);
+      else if (r.status === 'forbidden') askToken('Wrong secret code');
+      else msg('Error: ' + err(r.status));
     })
-    .catch(e => { $('send').disabled = false; msg('Ошибка: ' + e.message); });
+    .catch(e => { $('send').disabled = false; msg('Error: ' + e.message); });
 };
 
 let armed = false;
-const UNDO_TEXT = 'Отменить последнюю запись';
+const UNDO_TEXT = 'Undo last entry';
 $('undo').onclick = () => {
   const player = $('player').value;
-  if (!player) return msg('Сначала выберите ник');
+  if (!player) return msg('Select your nickname first');
   if (!armed) {
-    armed = true; $('undo').textContent = 'Нажмите ещё раз для отмены';
+    armed = true; $('undo').textContent = 'Tap again to confirm';
     setTimeout(() => { armed = false; $('undo').textContent = UNDO_TEXT; }, 4000);
     return;
   }
   armed = false; $('undo').textContent = UNDO_TEXT;
-  msg('Отменяю…');
+  msg('Undoing…');
   api({ action: 'undo', token, player })
     .then(r => {
-      msg(r.status === 'ok' ? 'Последняя запись отменена' : 'Ошибка: ' + r.status);
+      msg(r.status === 'ok' ? 'Last entry undone' : 'Error: ' + err(r.status));
       if (r.data) render(r.data);
     })
-    .catch(e => msg('Ошибка: ' + e.message));
+    .catch(e => msg('Error: ' + e.message));
 };
 
 load();

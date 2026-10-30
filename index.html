@@ -20,6 +20,7 @@
   .bar i{display:block;height:100%;background:#4a7c1f}
   .small{font-size:13px;color:#666;margin-top:4px}
   #msg{margin-top:12px;font-weight:bold}
+  #link a{display:block;margin-top:8px;padding:12px;background:#fff;border:1px solid #4a7c1f;border-radius:8px;color:#2d5a0a;text-align:center;font-size:16px;text-decoration:none}
 </style>
 </head>
 <body>
@@ -40,6 +41,7 @@
   <label>Получатель (заявка)</label>
   <select id="recipient"></select>
   <div id="info" class="small"></div>
+  <div id="link"></div>
 
   <label>Сумма (все ресурсы вместе, как «Всего» в игре)</label>
   <input id="total" type="text" inputmode="numeric" placeholder="например 333000">
@@ -56,7 +58,7 @@
 </div>
 
 <script>
-const API = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
+const API = 'ВСТАВЬТЕ_СЮДА_URL_ВЕБ_ПРИЛОЖЕНИЯ_/exec';
 
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('ru-RU');
@@ -140,6 +142,17 @@ function showInfo() {
   const r = data && data.requests.find(x => x.name === name);
   $('info').textContent = r ? 'Собрано ' + fmt(r.got) + ' из ' + fmt(r.need) +
     ', осталось ' + fmt(Math.max(r.need - r.got, 0)) : '';
+
+  const box = $('link');
+  box.innerHTML = '';
+  if (r && r.link && /^https?:\/\//i.test(r.link)) {
+    const a = document.createElement('a');
+    a.href = r.link;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Открыть отправку ресурсов → ' + r.name;
+    box.appendChild(a);
+  }
 }
 
 $('tokenSave').onclick = () => {

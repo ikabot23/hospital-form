@@ -16,6 +16,8 @@
   button:disabled{opacity:.5}
   button.sec{background:#fff;color:#a33;border:1px solid #a33;margin-top:10px;font-size:15px}
   .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
+  .card.mine{border-left:4px solid #4a7c1f}
+  .card.off{opacity:.5;text-decoration:line-through}
   .bar{height:8px;background:#ddd;border-radius:4px;overflow:hidden;margin-top:6px}
   .bar i{display:block;height:100%;background:#4a7c1f}
   .small{font-size:13px;color:#666;margin-top:4px}
@@ -49,9 +51,9 @@
   <button id="send">Save shipment</button>
   <div id="msg"></div>
 
-  <h3>My recent entries</h3>
+  <h3>Last 5 entries (everyone)</h3>
   <div id="recent"></div>
-  <button class="sec" id="undo">Undo last entry</button>
+  <button class="sec" id="undo">Undo my last entry</button>
 
   <h3>Requests</h3>
   <div id="reqs"></div>
@@ -110,7 +112,7 @@ function load() {
   $('tokenBox').hidden = true;
   $('main').hidden = false;
   $('status').textContent = 'Loading…';
-  api({ action: 'data', token, player: $('player').value || lsGet('player') })
+  api({ action: 'data', token })
     .then(d => { $('status').textContent = ''; render(d); })
     .catch(e => { $('status').textContent = 'Error: ' + e.message; });
 }
@@ -126,12 +128,14 @@ function render(d) {
     curR, '— select request —');
   showInfo();
 
+  const me = $('player').value.trim().toLowerCase();
   const rc = $('recent'); rc.innerHTML = '';
   if (!d.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
   d.recent.forEach(r => {
     const div = document.createElement('div');
-    div.className = 'card';
-    div.textContent = r.time + ' → ' + r.to + ': ' + fmt(r.total);
+    div.className = 'card' + (r.player.trim().toLowerCase() === me ? ' mine' : '') + (r.cancelled ? ' off' : '');
+    div.textContent = r.time + ' · ' + r.player + ' → ' + r.to + ': ' + fmt(r.total) +
+      (r.cancelled ? ' (cancelled)' : '');
     rc.appendChild(div);
   });
 
@@ -174,7 +178,7 @@ $('tokenSave').onclick = () => {
   $('tokMsg').textContent = '';
   load();
 };
-$('player').onchange = () => { lsSet('player', $('player').value); load(); };
+$('player').onchange = () => { lsSet('player', $('player').value); if (data) render(data); };
 $('recipient').onchange = showInfo;
 
 $('send').onclick = () => {
@@ -199,7 +203,7 @@ $('send').onclick = () => {
 };
 
 let armed = false;
-const UNDO_TEXT = 'Undo last entry';
+const UNDO_TEXT = 'Undo my last entry';
 $('undo').onclick = () => {
   const player = $('player').value;
   if (!player) return msg('Select your nickname first');

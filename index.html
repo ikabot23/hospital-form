@@ -15,7 +15,7 @@
   label{display:block;margin:12px 0 4px;font-size:14px;color:#555}
   select,input,button{width:100%;box-sizing:border-box;font-size:18px;padding:12px;border-radius:8px;border:1px solid #999}
   button{background:#4a7c1f;color:#fff;border:0;margin-top:16px}
-  button:disabled{opacity:.5}
+  button:disabled{opacity:.5;cursor:not-allowed}
   button.sec{background:#fff;color:#a33;border:1px solid #a33;margin-top:10px;font-size:15px}
   #chips button{width:auto;margin:8px 8px 0 0;padding:8px 12px;font-size:15px;background:#fff;color:#2d5a0a;border:1px solid #4a7c1f}
   .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
@@ -50,10 +50,10 @@
   <div id="link"></div>
 
   <label>Amount (all resources combined, same as “Total” in the game)</label>
-  <input id="total" type="text" inputmode="numeric" enterkeyhint="send" placeholder="e.g. 333000">
+  <input id="total" type="text" inputmode="numeric" enterkeyhint="send" placeholder="e.g. 333 000">
   <div id="chips"></div>
 
-  <button id="send">Save shipment</button>
+  <button id="send" disabled>Save shipment</button>
   <div id="msg"></div>
 
   <h3>Last 5 entries (everyone)</h3>
@@ -65,6 +65,11 @@
 </div>
 
 <script>
+window.addEventListener('error', e => {
+  const s = document.getElementById('status');
+  if (s) s.textContent = 'Script error: ' + e.message;
+});
+
 const API = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
 
 const ERR = {
@@ -80,15 +85,37 @@ const err = s => ERR[s] || s;
 
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('en-US');
+const digits = s => String(s).replace(/\D/g, '');
+const spaced = s => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');   // 1000000 -> 1 000 000
+const totalNum = () => Number(digits($('total').value)) || 0;
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 let token = lsGet('token');
 let data = null;
 let busy = false;
+let saving = false;
 let lastLoad = 0;
 let lastJson = '';
 
 function msg(t) { $('msg').textContent = t; }
+
+// Кнопка активна только когда выбраны ник, заявка и введена сумма
+function updateSend() {
+  $('send').disabled = saving || !($('player').value && $('recipient').value && totalNum() > 0);
+}
+
+// Формат суммы при вводе: 1 000 000 (курсор не прыгает)
+function fmtTotal() {
+  const el = $('total');
+  const pos = el.selectionStart == null ? el.value.length : el.selectionStart;
+  const before = digits(el.value.slice(0, pos)).length;
+  const f = spaced(digits(el.value).slice(0, 12));
+  el.value = f;
+  let p = 0, cnt = 0;
+  while (p < f.length && cnt < before) { if (f[p] !== ' ') cnt++; p++; }
+  try { el.setSelectionRange(p, p); } catch (e) {}
+  updateSend();
+}
 
 // Черновик: выбранный получатель и сумма (хранится 30 минут)
 function saveDraft() {
@@ -109,12 +136,14 @@ function pushAmt(t) {
   lsSet('amts', JSON.stringify(a));
 }
 function showChips() {
-  const box = $('chips'); box.innerHTML = '';
+  const box = $('chips');
+  if (!box) return;
+  box.innerHTML = '';
   getAmts().forEach(a => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = fmt(a);
-    b.onclick = () => { $('total').value = a; saveDraft(); };
+    b.textContent = spaced(a);
+    b.onclick = () => { $('total').value = spaced(a); saveDraft(); updateSend(); };
     box.appendChild(b);
   });
 }
@@ -221,6 +250,8 @@ function render(d) {
     bar.appendChild(i); div.appendChild(bar);
     rq.appendChild(div);
   });
+
+  updateSend();
 }
 
 function showInfo() {
@@ -249,27 +280,28 @@ $('tokenSave').onclick = () => {
   $('tokMsg').textContent = '';
   load();
 };
-$('player').onchange = () => { lsSet('player', $('player').value); if (data) render(data); };
+$('player').onchange = () => { lsSet('player', $('player').value); if (data) render(data); updateSend(); };
 $('recipient').onchange = () => {
   showInfo();
   saveDraft();
+  updateSend();
   if ($('recipient').value) $('total').focus();   // сразу к вводу суммы
 };
-$('total').oninput = saveDraft;
+$('total').oninput = () => { fmtTotal(); saveDraft(); };
 $('total').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); $('send').click(); }   // «Готово» на клавиатуре сохраняет
 });
 
 $('send').onclick = () => {
   const player = $('player').value, rec = $('recipient').value;
-  const total = Number($('total').value.replace(/\D/g, ''));
+  const total = totalNum();
   if (!player || !rec || !total) return msg('Select your nickname and a request, then enter an amount');
   lsSet('player', player);
-  $('send').disabled = true;
+  saving = true; updateSend();
   msg('Saving…');
   api({ action: 'save', token, player, recipient: rec, total })
     .then(r => {
-      $('send').disabled = false;
+      saving = false;
       if (r.status === 'ok') {
         msg('Saved: +' + fmt(total) + ' → ' + rec);
         $('total').value = '';
@@ -282,8 +314,9 @@ $('send').onclick = () => {
       }
       else if (r.status === 'forbidden') askToken('Wrong secret code');
       else msg('Error: ' + err(r.status));
+      updateSend();
     })
-    .catch(e => { $('send').disabled = false; msg('Error: ' + e.message); });
+    .catch(e => { saving = false; updateSend(); msg('Error: ' + e.message); });
 };
 
 let armed = false;
@@ -330,7 +363,7 @@ if (token) {
   try {
     const cached = lsGet('formCache');
     const dr = loadDraft();
-    if (dr) $('total').value = dr.t || '';
+    if (dr) $('total').value = spaced(dr.t || '');
     if (cached) {
       lastJson = cached;
       $('tokenBox').hidden = true;
@@ -339,6 +372,7 @@ if (token) {
     }
   } catch (e) {}
 }
+updateSend();
 load();
 </script>
 </body>

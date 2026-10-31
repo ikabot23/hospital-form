@@ -20,7 +20,6 @@
   #chips button{width:auto;margin:8px 8px 0 0;padding:8px 12px;font-size:15px;background:#fff;color:#2d5a0a;border:1px solid #4a7c1f}
   .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
   .card.rec{border-left:6px solid #ddd}
-  .card.mine{font-weight:600}
   .card.off{opacity:.5;text-decoration:line-through}
   .bar{height:8px;background:#ddd;border-radius:4px;overflow:hidden;margin-top:6px}
   .bar i{display:block;height:100%;background:#4a7c1f}
@@ -221,12 +220,11 @@ function render(d) {
   d.requests.forEach(r => { if (r.color) colors[r.name.trim().toLowerCase()] = r.color; });
 
   // последние записи: боковая полоска в цвет получателя
-  const me = $('player').value.trim().toLowerCase();
   const rc = $('recent'); rc.innerHTML = '';
   if (!d.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
   d.recent.forEach(r => {
     const div = document.createElement('div');
-    div.className = 'card rec' + (r.player.trim().toLowerCase() === me ? ' mine' : '') + (r.cancelled ? ' off' : '');
+    div.className = 'card rec' + (r.cancelled ? ' off' : '');
     div.textContent = r.time + ' · ' + r.player + ' → ' + r.to + ': ' + fmt(r.total) +
       (r.cancelled ? ' (cancelled)' : '');
     const col = colors[r.to.trim().toLowerCase()];

@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f4efe3">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com">
 <title>Hospital: log your shipment</title>
 <style>
   html{background:#f4efe3;min-height:100%}
@@ -15,6 +17,7 @@
   button{background:#4a7c1f;color:#fff;border:0;margin-top:16px}
   button:disabled{opacity:.5}
   button.sec{background:#fff;color:#a33;border:1px solid #a33;margin-top:10px;font-size:15px}
+  #chips button{width:auto;margin:8px 8px 0 0;padding:8px 12px;font-size:15px;background:#fff;color:#2d5a0a;border:1px solid #4a7c1f}
   .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
   .card.rec{border-left:6px solid #ddd}
   .card.mine{font-weight:600}
@@ -47,7 +50,8 @@
   <div id="link"></div>
 
   <label>Amount (all resources combined, same as “Total” in the game)</label>
-  <input id="total" type="text" inputmode="numeric" placeholder="e.g. 333000">
+  <input id="total" type="text" inputmode="numeric" enterkeyhint="send" placeholder="e.g. 333000">
+  <div id="chips"></div>
 
   <button id="send">Save shipment</button>
   <div id="msg"></div>
@@ -80,162 +84,16 @@ const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { r
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 let token = lsGet('token');
 let data = null;
+let busy = false;
+let lastLoad = 0;
+let lastJson = '';
 
 function msg(t) { $('msg').textContent = t; }
 
-async function api(body) {
-  const r = await fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(body)
-  });
-  const text = await r.text();
-  try { return JSON.parse(text); }
-  catch (e) { throw new Error('server returned no data: ' + text.slice(0, 80)); }
+// Черновик: выбранный получатель и сумма (хранится 30 минут)
+function saveDraft() {
+  lsSet('draft', JSON.stringify({ r: $('recipient').value, t: $('total').value, ts: Date.now() }));
 }
-
-function askToken(text) {
-  token = ''; lsSet('token', '');
-  $('tokMsg').textContent = text || '';
-  $('tokenBox').hidden = false;
-  $('main').hidden = true;
-}
-
-function fillSelect(sel, items, cur, placeholder) {
-  sel.innerHTML = '';
-  sel.add(new Option(placeholder, ''));
-  items.forEach(it => sel.add(new Option(it.label, it.value)));
-  sel.value = cur;
-}
-
-function load() {
-  if (!token) return askToken('');
-  $('tokenBox').hidden = true;
-  $('main').hidden = false;
-  $('status').textContent = 'Loading…';
-  api({ action: 'data', token })
-    .then(d => { $('status').textContent = ''; render(d); })
-    .catch(e => { $('status').textContent = 'Error: ' + e.message; });
-}
-
-function render(d) {
-  if (d.error) return askToken('Wrong secret code (server version ' + d.ver + ')');
-  data = d;
-  const curP = $('player').value || lsGet('player');
-  const curR = $('recipient').value;
-  fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
-  fillSelect($('recipient'),
-    d.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
-    curR, '— select request —');
-  showInfo();
-
-  // цвета заявок: имя -> цвет заливки из таблицы
-  const colors = {};
-  d.requests.forEach(r => { if (r.color) colors[r.name.trim().toLowerCase()] = r.color; });
-
-  // последние записи: боковая полоска в цвет получателя
-  const me = $('player').value.trim().toLowerCase();
-  const rc = $('recent'); rc.innerHTML = '';
-  if (!d.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
-  d.recent.forEach(r => {
-    const div = document.createElement('div');
-    div.className = 'card rec' + (r.player.trim().toLowerCase() === me ? ' mine' : '') + (r.cancelled ? ' off' : '');
-    div.textContent = r.time + ' · ' + r.player + ' → ' + r.to + ': ' + fmt(r.total) +
-      (r.cancelled ? ' (cancelled)' : '');
-    const col = colors[r.to.trim().toLowerCase()];
-    if (col) div.style.borderLeftColor = col;
-    rc.appendChild(div);
-  });
-
-  // заявки: полоска прогресса в цвет ячейки
-  const rq = $('reqs'); rq.innerHTML = '';
-  d.requests.forEach(r => {
-    const div = document.createElement('div');
-    div.className = 'card';
-    const pct = r.need ? Math.min(100, Math.round(r.got / r.need * 100)) : 0;
-    div.textContent = r.name + ': ' + fmt(r.got) + ' of ' + fmt(r.need);
-    const bar = document.createElement('div'); bar.className = 'bar';
-    const i = document.createElement('i'); i.style.width = pct + '%';
-    if (r.color) {
-      i.style.background = r.color;
-      i.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,.2)';
-    }
-    bar.appendChild(i); div.appendChild(bar);
-    rq.appendChild(div);
-  });
-}
-
-function showInfo() {
-  const name = $('recipient').value;
-  const r = data && data.requests.find(x => x.name === name);
-  $('info').textContent = r ? 'Collected ' + fmt(r.got) + ' of ' + fmt(r.need) +
-    ', remaining ' + fmt(Math.max(r.need - r.got, 0)) : '';
-
-  const box = $('link');
-  box.innerHTML = '';
-  if (r && r.link && /^https?:\/\//i.test(r.link)) {
-    const a = document.createElement('a');
-    a.href = r.link;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = 'Open send-resources page → ' + r.name;
-    box.appendChild(a);
-  }
-}
-
-$('tokenSave').onclick = () => {
-  const t = $('token').value.replace(/[\s\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '');
-  if (!t) return;
-  token = t;
-  lsSet('token', t);
-  $('tokMsg').textContent = '';
-  load();
-};
-$('player').onchange = () => { lsSet('player', $('player').value); if (data) render(data); };
-$('recipient').onchange = showInfo;
-
-$('send').onclick = () => {
-  const player = $('player').value, rec = $('recipient').value;
-  const total = Number($('total').value.replace(/\D/g, ''));
-  if (!player || !rec || !total) return msg('Select your nickname and a request, then enter an amount');
-  lsSet('player', player);
-  $('send').disabled = true;
-  msg('Saving…');
-  api({ action: 'save', token, player, recipient: rec, total })
-    .then(r => {
-      $('send').disabled = false;
-      if (r.status === 'ok') {
-        msg('Saved: +' + fmt(total) + ' → ' + rec);
-        $('total').value = '';
-        render(r.data);
-      }
-      else if (r.status === 'forbidden') askToken('Wrong secret code');
-      else msg('Error: ' + err(r.status));
-    })
-    .catch(e => { $('send').disabled = false; msg('Error: ' + e.message); });
-};
-
-let armed = false;
-const UNDO_TEXT = 'Undo my last entry';
-$('undo').onclick = () => {
-  const player = $('player').value;
-  if (!player) return msg('Select your nickname first');
-  if (!armed) {
-    armed = true; $('undo').textContent = 'Tap again to confirm';
-    setTimeout(() => { armed = false; $('undo').textContent = UNDO_TEXT; }, 4000);
-    return;
-  }
-  armed = false; $('undo').textContent = UNDO_TEXT;
-  msg('Undoing…');
-  api({ action: 'undo', token, player })
-    .then(r => {
-      msg(r.status === 'ok' ? 'Last entry undone' : 'Error: ' + err(r.status));
-      if (r.data) render(r.data);
-    })
-    .catch(e => msg('Error: ' + e.message));
-};
-
-load();
-</script>
-</body>
-</html>
+function loadDraft() {
+  try {
+    const d = JSON.parse(lsGet('draft') || 'null');

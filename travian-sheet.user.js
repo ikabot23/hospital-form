@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Travian: hospital shipments -> Google Sheets
 // @namespace    travian-sheet-sender
-// @version      1.9
-// @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a floating window with active requests
-// @include      https://*.travian.*/*
+// @version      2.2
+// @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests
+// @include      https://*.europe.travian.*/*
+// @include      https://*.international.travian.*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -14,11 +15,13 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[Sheet] script loaded (multi-lang v1.9)');
+  console.log('[Sheet] script loaded (multi-lang v2.2)');
 
   const WEB_APP = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
   const FORM_URL = 'https://ikabot23.github.io/hospital-form';
-  const SHOW_PANEL = true;   // false = hide the floating window
+  const SHOW_PANEL = true;      // false = hide the floating window
+  const PANEL_MODE = 'page';    // 'page'  = like ResourceBar+ (absolute in <body>, moves with the page)
+                                // 'fixed' = glued to the screen (stays in place while scrolling)
 
   const clean = s => String(s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim();
 
@@ -190,84 +193,143 @@
     tryReportFromForm(form);
   }, true);
 
+  // Time shown by the game clock (the "9:50:12 (UTC)" box); falls back to the computer clock
+  function gameTimeLabel() {
+    const RE = /(\d{1,2}):(\d{2})(?::\d{2})?\s*\(?\s*((?:UTC|GMT)(?:\s?[+\-\u2212]\s?\d{1,2}(?::\d{2})?)?)\s*\)?/i;
+    let best = null;
+    try {
+      document.querySelectorAll('div,span,p,td,li').forEach(e => {
+        if (e.children.length > 3) return;
+        const t = clean(e.textContent);
+        if (t.length > 60) return;
+        const m = RE.exec(t);
+        if (m && (!best || t.length < best.len)) best = { len: t.length, m };
+      });
+    } catch (e) {}
+    if (best) return best.m[1] + ':' + best.m[2] + ' ' + best.m[3].replace(/\s+/g, '').toUpperCase();
+    return new Date().toTimeString().slice(0, 5);
+  }
+
   // ================= Floating window with active requests =================
   function initPanel() {
     if (document.getElementById('hospital-panel-host')) return;   // already created (e.g. a second copy of the script)
 
+    const PAGE = PANEL_MODE === 'page';
     const fmt = n => Number(n).toLocaleString('en-US');
     const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+    const isActive = r => r.need > 0 && r.need - r.got > 0;
 
     const host = document.createElement('div');
     host.id = 'hospital-panel-host';
-    host.style.cssText = 'position:fixed;z-index:2147483000;left:0;top:0;';
+    host.style.cssText = PAGE
+      // like ResourceBar+: absolute, page coordinates, negative right margin so the window is never squeezed
+      ? 'position:absolute;z-index:5999;left:0;top:0;margin:0 -10000px 0 0;padding:0;border:0;background:none;width:auto;height:auto;'
+      : 'position:fixed;z-index:2147483000;left:0;top:0;right:auto;bottom:auto;margin:0;padding:0;border:0;' +
+        'background:none;overflow:visible;width:auto;height:auto;max-width:none;max-height:none;';
     const shadow = host.attachShadow({ mode: 'open' });   // game CSS cannot affect the window
 
     const style = document.createElement('style');
     style.textContent = `
-      .box{font:12px/1.35 system-ui,sans-serif;color:#222;background:#f4efe3;border:1px solid #8a7a55;
-           border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.35);width:250px;overflow:hidden}
-      .head{display:flex;align-items:center;gap:6px;padding:5px 8px;background:#5c4a28;color:#fff;
+      .box{font:11px/1.3 system-ui,sans-serif;color:#222;background:#f4efe3;border:1px solid #8a7a55;
+           border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);width:220px;overflow:hidden}
+      .head{display:flex;align-items:center;gap:2px;padding:3px 6px;background:#5c4a28;color:#fff;
             cursor:move;user-select:none;touch-action:none}
-      .head b{flex:1;font-size:12px}
-      .head button{all:unset;cursor:pointer;padding:0 5px;font-size:14px;color:#fff}
-      .list{max-height:60vh;overflow:auto;padding:2px 8px}
-      .row{padding:5px 0;border-bottom:1px solid #ddd0b8}
+      .ttl{flex:1;min-width:0;line-height:1.2}
+      .ttl b{font-size:12px;white-space:nowrap}
+      .ttl small{display:block;font-size:9.5px;color:#dccfb2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .head button,.head a.btn{all:unset;cursor:pointer;padding:0 4px;font-size:14px;color:#fff;line-height:1}
+      .list{max-height:50vh;overflow:auto;padding:1px 6px}
+      .row{padding:3px 0;border-bottom:1px solid #ddd0b8}
       .row:last-child{border-bottom:0}
       .top{display:flex;justify-content:space-between;gap:6px;font-weight:600}
       .name{color:#1f5e9e;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       a.name:hover{text-decoration:underline}
-      .bar{height:6px;background:#ddd;border-radius:3px;overflow:hidden;margin:3px 0}
+      .bar{height:4px;background:#ddd;border-radius:2px;overflow:hidden;margin:2px 0}
       .bar i{display:block;height:100%;background:#4a7c1f;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
-      .sub{font-size:11px;color:#555}
-      .foot{display:flex;justify-content:space-between;padding:3px 8px 5px;font-size:10px;color:#666;border-top:1px solid #ddd0b8}
-      .foot a{color:#1f5e9e}
-      .msg{padding:8px 0;color:#a33}
-      .msg button{margin-top:6px;padding:4px 8px;font-size:12px;cursor:pointer}
-      .hide .list,.hide .foot{display:none}
+      .sub{font-size:10px;color:#555}
+      .msg{padding:6px 0;color:#a33}
+      .msg button{margin-top:4px;padding:3px 8px;font-size:11px;cursor:pointer}
+      .hide .list{display:none}
     `;
 
     const box = el('div', 'box');
     const head = el('div', 'head');
-    const title = el('b'); title.textContent = '🏥 Hospital requests';
+    const ttl = el('div', 'ttl');
+    const b = el('b'); b.textContent = '🏥 Hospital ';
+    const cnt = el('span');            // "[3 requests]"
+    b.append(cnt);
+    const upd = el('small');           // "updated 9:50 UTC"
+    ttl.append(b, upd);
+    const btnLog = el('a', 'btn');
+    btnLog.textContent = '+'; btnLog.title = 'Log a shipment (form)';
+    btnLog.href = FORM_URL; btnLog.target = '_blank'; btnLog.rel = 'noopener';
     const btnRefresh = el('button'); btnRefresh.textContent = '↻'; btnRefresh.title = 'Refresh';
     const btnToggle = el('button'); btnToggle.title = 'Collapse / expand';
-    head.append(title, btnRefresh, btnToggle);
+    head.append(ttl, btnLog, btnRefresh, btnToggle);
     const list = el('div', 'list');
-    const foot = el('div', 'foot');
-    const stamp = el('span');
-    const formLink = el('a');
-    formLink.href = FORM_URL; formLink.target = '_blank'; formLink.rel = 'noopener'; formLink.textContent = 'Log shipment';
-    foot.append(stamp, formLink);
-    box.append(head, list, foot);
+    box.append(head, list);
     shadow.append(style, box);
-    (document.body || document.documentElement).appendChild(host);
+
+    if (PAGE) {
+      document.body.appendChild(host);            // exactly like ResourceBar+
+    } else {
+      document.documentElement.appendChild(host); // directly under <html>, in the browser top layer when supported
+      try { host.setAttribute('popover', 'manual'); host.showPopover(); }
+      catch (e) { host.removeAttribute('popover'); }
+    }
 
     // ----- position (drag with mouse or finger) -----
+    const POS_KEY = 'panelPos_' + PANEL_MODE;   // page and screen coordinates differ, so they are saved separately
     let px = 0, py = 0;
     function place(x, y) {
-      px = Math.max(0, Math.min(x, window.innerWidth - 60));
-      py = Math.max(0, Math.min(y, window.innerHeight - 30));
+      const maxX = (PAGE ? Math.max(document.documentElement.scrollWidth, window.innerWidth) : window.innerWidth) - 60;
+      const maxY = (PAGE ? Math.max(document.documentElement.scrollHeight, window.innerHeight) : window.innerHeight) - 30;
+      px = Math.max(0, Math.min(x, maxX));
+      py = Math.max(0, Math.min(y, maxY));
       host.style.left = px + 'px';
       host.style.top = py + 'px';
     }
     let pos = null;
-    try { pos = JSON.parse(GM_getValue('panelPos', 'null')); } catch (e) {}
-    place(pos ? pos.x : window.innerWidth - 270, pos ? pos.y : 110);
+    try { pos = JSON.parse(GM_getValue(POS_KEY, 'null')); } catch (e) {}
+    place(pos ? pos.x : window.innerWidth - 240, pos ? pos.y : 110);
     window.addEventListener('resize', () => place(px, py));
 
+    const pt = e => PAGE ? [e.pageX, e.pageY] : [e.clientX, e.clientY];
     let drag = null;
     head.addEventListener('pointerdown', e => {
-      if (e.target.closest('button')) return;
-      const r = host.getBoundingClientRect();
-      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      if (e.target.closest('button, a')) return;
+      const [x, y] = pt(e);
+      drag = { dx: x - px, dy: y - py };
       head.setPointerCapture(e.pointerId);
     });
-    head.addEventListener('pointermove', e => { if (drag) place(e.clientX - drag.dx, e.clientY - drag.dy); });
+    head.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const [x, y] = pt(e);
+      place(x - drag.dx, y - drag.dy);
+    });
     head.addEventListener('pointerup', () => {
       if (!drag) return;
       drag = null;
-      GM_setValue('panelPos', JSON.stringify({ x: px, y: py }));
+      GM_setValue(POS_KEY, JSON.stringify({ x: px, y: py }));
     });
+
+    // Screen mode only: keeps the window glued to the screen even if the game's CSS makes "fixed" elements scroll
+    if (!PAGE) {
+      const pin = () => {
+        const r = host.getBoundingClientRect();
+        if (!r.width || !host.offsetWidth) return;
+        const sx = r.width / host.offsetWidth || 1, sy = r.height / host.offsetHeight || 1;
+        const dx = px - r.left, dy = py - r.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+        host.style.left = ((parseFloat(host.style.left) || 0) + dx / sx) + 'px';
+        host.style.top = ((parseFloat(host.style.top) || 0) + dy / sy) + 'px';
+      };
+      window.addEventListener('scroll', pin, { passive: true, capture: true });
+      window.addEventListener('resize', pin);
+      setInterval(pin, 1000);
+    }
+    console.log('[Sheet] panel mode:', PANEL_MODE,
+      '| scrolling element:', document.scrollingElement && document.scrollingElement.tagName);
 
     // ----- collapse / expand -----
     let collapsed = GM_getValue('panelCollapsed', window.innerWidth < 700);
@@ -277,26 +339,38 @@
     }
     function toggle() { collapsed = !collapsed; GM_setValue('panelCollapsed', collapsed); applyCollapsed(); }
     btnToggle.onclick = toggle;
-    head.addEventListener('dblclick', e => { if (!e.target.closest('button')) toggle(); });
+    head.addEventListener('dblclick', e => { if (!e.target.closest('button, a')) toggle(); });
     applyCollapsed();
 
     // ----- content -----
+    function setHeader(d, label) {
+      if (d) {
+        const n = (d.requests || []).filter(isActive).length;
+        cnt.textContent = '[' + n + ' ' + (n === 1 ? 'request' : 'requests') + ']';
+      } else {
+        cnt.textContent = '';
+      }
+      upd.textContent = label ? 'updated ' + label : '';
+    }
+
     function showMsg(text, askCode) {
+      setHeader(null, '');
       list.textContent = '';
       const m = el('div', 'msg');
       m.textContent = text;
       if (askCode) {
-        const b = el('button');
-        b.textContent = 'Enter secret code';
-        b.onclick = () => { if (getToken()) refresh(true); };
-        m.append(document.createElement('br'), b);
+        const bt = el('button');
+        bt.textContent = 'Enter secret code';
+        bt.onclick = () => { if (getToken()) refresh(true); };
+        m.append(document.createElement('br'), bt);
       }
       list.append(m);
     }
 
-    function render(d, at) {
+    function render(d, label) {
+      setHeader(d, label);
       list.textContent = '';
-      const active = (d.requests || []).filter(r => r.need > 0 && r.need - r.got > 0);
+      const active = (d.requests || []).filter(isActive);
       if (!active.length) {
         const m = el('div', 'msg');
         m.style.color = '#555';
@@ -334,30 +408,26 @@
         row.append(top, bar, sub);
         list.append(row);
       });
-      stamp.textContent = 'Updated ' + new Date(at || Date.now()).toTimeString().slice(0, 5);
     }
 
-    // ----- data: cached between pages, polled gently so that 60+ players do not overload Apps Script -----
-    const POLL_SECONDS = 90;          // base interval (the real one is randomised by about +-20%)
-    const IDLE_MINUTES = 10;          // no mouse / keyboard / touch for this long = stop polling
-    const MAX_BACKOFF_SECONDS = 300;  // after errors the interval grows up to this
+    // ----- data: refreshed every 15 minutes, on own shipment, on expanding, and with the refresh button -----
+    const POLL_MS = 15 * 60000;
+    const AUTO_GAP = POLL_MS * 0.8;   // automatic refresh only when the data is older than this
 
-    let cachedAt = 0, busy = false, hasData = false, failures = 0, lastActive = Date.now();
-    ['mousemove', 'keydown', 'pointerdown', 'touchstart', 'scroll'].forEach(ev =>
-      window.addEventListener(ev, () => { lastActive = Date.now(); }, { passive: true, capture: true }));
-    const isIdle = () => Date.now() - lastActive > IDLE_MINUTES * 60000;
-    const staleMs = () => (POLL_SECONDS - 10) * 1000;
+    let cachedAt = 0, busy = false, hasData = false, failures = 0;
 
     function fail(text) {
       failures++;
-      if (hasData) stamp.textContent = text + ', retrying…';   // keep the last data on screen
+      if (hasData) upd.textContent = text + ', retrying…';   // keep the last data on screen
       else showMsg(text + ', retrying…');
     }
 
-    function refresh(force) {
+    // force = refresh now (minGap: but not more often than this many ms); otherwise only if data is old
+    function refresh(force, minGap) {
       const token = GM_getValue('token');
       if (!token) { showMsg('Secret code needed', true); return; }
-      if (!force && cachedAt && Date.now() - cachedAt < staleMs()) return;
+      const gap = force ? (minGap || 0) : AUTO_GAP;
+      if (cachedAt && Date.now() - cachedAt < gap) return;
       if (busy) return;
       busy = true;
       GM_xmlhttpRequest({
@@ -376,29 +446,33 @@
           }
           failures = 0;
           cachedAt = Date.now();
-          GM_setValue('panelData', JSON.stringify({ at: cachedAt, data: d }));
+          const label = gameTimeLabel();   // time from the game clock
+          GM_setValue('panelData', JSON.stringify({ at: cachedAt, label, data: d }));
           hasData = true;
-          render(d, cachedAt);
+          render(d, label);
         },
         onerror: () => { busy = false; fail('No connection'); }
       });
     }
     btnRefresh.onclick = () => refresh(true);
 
-    // opening the collapsed window or returning to the tab refreshes only if the data is old enough
-    btnToggle.addEventListener('click', () => { if (!collapsed) refresh(); });
-    head.addEventListener('dblclick', e => { if (!e.target.closest('button') && !collapsed) refresh(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && !collapsed) refresh(); });
-    window.addEventListener('focus', () => { if (!collapsed) refresh(); });
+    // expanding the window refreshes (at most once per 1 minute)
+    const OPEN_GAP = 60 * 1000;
+    btnToggle.addEventListener('click', () => { if (!collapsed) refresh(true, OPEN_GAP); });
+    head.addEventListener('dblclick', e => {
+      if (!e.target.closest('button, a') && !collapsed) refresh(true, OPEN_GAP);
+    });
+    // coming back to the tab: only if the data is older than ~12 min
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    window.addEventListener('focus', () => refresh());
 
-    // poll loop: random jitter, backs off after errors, skips hidden / collapsed / idle states
+    // 15-minute loop with a little random spread; after errors it retries sooner (2, 4, 8 ... min)
     function schedule() {
-      const base = POLL_SECONDS * 1000;
-      const wait = Math.min(base * Math.pow(2, failures), MAX_BACKOFF_SECONDS * 1000);
+      const wait = failures ? Math.min(120000 * Math.pow(2, failures - 1), POLL_MS) : POLL_MS;
       setTimeout(() => {
-        if (!document.hidden && !collapsed && !isIdle()) refresh();
+        if (!document.hidden) refresh();
         schedule();
-      }, wait * (0.8 + Math.random() * 0.4));
+      }, wait * (0.9 + Math.random() * 0.2));
     }
 
     // show the last known data immediately (no waiting on every page change)
@@ -407,13 +481,13 @@
     if (saved && saved.data) {
       cachedAt = saved.at || 0;
       hasData = true;
-      render(saved.data, saved.at);
+      render(saved.data, saved.label || new Date(saved.at || Date.now()).toTimeString().slice(0, 5));
     } else if (!GM_getValue('token')) {
       showMsg('Secret code needed', true);
     } else {
       showMsg('Loading…');
     }
-    if (!collapsed) refresh();   // only goes out if the data is older than ~80 s
+    refresh();      // goes out only if the saved data is older than ~12 min
     schedule();
 
     panelApi = { refresh };

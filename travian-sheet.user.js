@@ -431,7 +431,7 @@
         method: 'POST',
         url: WEB_APP,
         headers: { 'Content-Type': 'text/plain' },
-        data: JSON.stringify({ action: 'data', token }),
+        data: JSON.stringify({ action: 'panel', token }),
         onload: r => {
           busy = false;
           let d;

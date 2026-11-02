@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Travian: hospital shipments -> Google Sheets
 // @namespace    travian-sheet-sender
-// @version      2.2
+// @version      2.3
 // @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests
 // @include      https://*.europe.travian.*/*
 // @include      https://*.international.travian.*/*
@@ -15,17 +15,18 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[Sheet] script loaded (multi-lang v2.2)');
+  console.log('[Sheet] script loaded (multi-lang v2.3)');
 
   const WEB_APP = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
   const FORM_URL = 'https://ikabot23.github.io/hospital-form';
-  const SHOW_PANEL = true;      // false = hide the floating window
-  const PANEL_MODE = 'page';    // 'page'  = like ResourceBar+ (absolute in <body>, moves with the page)
-                                // 'fixed' = glued to the screen (stays in place while scrolling)
+  const SHOW_PANEL = true;              // false = hide the floating window
+  const PANEL_MODE = 'page';            // 'page'  = like ResourceBar+ (absolute in <body>, moves with the page)
+                                        // 'fixed' = glued to the screen (stays in place while scrolling)
+  const REFRESH_AFTER_SHIPMENT = false; // true = also refresh the window after you send resources
 
   const clean = s => String(s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim();
 
-  let panelApi = null;   // set by the floating window, used to refresh it after a shipment
+  let panelApi = null;   // set by the floating window
 
   function getToken() {
     let t = GM_getValue('token');
@@ -109,7 +110,7 @@
         console.log('[Sheet]', r.status, txt);
         if (txt === 'ok') {
           toast('Sheet: shipment saved');
-          if (panelApi) setTimeout(() => panelApi.refresh(true), 1500);   // update the floating window
+          if (REFRESH_AFTER_SHIPMENT && panelApi) setTimeout(() => panelApi.refresh(), 1500);
         } else if (txt === 'forbidden') {
           GM_setValue('token', '');
           toast('Sheet: wrong secret code, you will be asked again on the next shipment');
@@ -331,7 +332,7 @@
     console.log('[Sheet] panel mode:', PANEL_MODE,
       '| scrolling element:', document.scrollingElement && document.scrollingElement.tagName);
 
-    // ----- collapse / expand -----
+    // ----- collapse / expand (does not refresh anything) -----
     let collapsed = GM_getValue('panelCollapsed', window.innerWidth < 700);
     function applyCollapsed() {
       box.classList.toggle('hide', !!collapsed);
@@ -361,7 +362,7 @@
       if (askCode) {
         const bt = el('button');
         bt.textContent = 'Enter secret code';
-        bt.onclick = () => { if (getToken()) refresh(true); };
+        bt.onclick = () => { if (getToken()) refresh(); };
         m.append(document.createElement('br'), bt);
       }
       list.append(m);
@@ -410,26 +411,22 @@
       });
     }
 
-    // ----- data: refreshed every 15 minutes, on own shipment, on expanding, and with the refresh button -----
-    const POLL_MS = 15 * 60000;
-    const AUTO_GAP = POLL_MS * 0.8;   // automatic refresh only when the data is older than this
-
-    let cachedAt = 0, busy = false, hasData = false, failures = 0;
+    // ----- data: refreshed only with the ↻ button and on the first visit in a browser tab -----
+    let cachedAt = 0, busy = false, hasData = false;
 
     function fail(text) {
-      failures++;
-      if (hasData) upd.textContent = text + ', retrying…';   // keep the last data on screen
-      else showMsg(text + ', retrying…');
+      if (hasData) upd.textContent = text + ' - press ↻';        // keep the last data on screen
+      else showMsg(text + ' - press ↻ to retry');
     }
 
-    // force = refresh now (minGap: but not more often than this many ms); otherwise only if data is old
-    function refresh(force, minGap) {
+    // minGap: skip the request if the saved data is fresher than this many milliseconds
+    function refresh(minGap) {
       const token = GM_getValue('token');
       if (!token) { showMsg('Secret code needed', true); return; }
-      const gap = force ? (minGap || 0) : AUTO_GAP;
-      if (cachedAt && Date.now() - cachedAt < gap) return;
+      if (minGap && cachedAt && Date.now() - cachedAt < minGap) return;
       if (busy) return;
       busy = true;
+      if (hasData) upd.textContent = 'updating…';
       GM_xmlhttpRequest({
         method: 'POST',
         url: WEB_APP,
@@ -444,7 +441,6 @@
             hasData = false;
             return showMsg('Wrong secret code', true);
           }
-          failures = 0;
           cachedAt = Date.now();
           const label = gameTimeLabel();   // time from the game clock
           GM_setValue('panelData', JSON.stringify({ at: cachedAt, label, data: d }));
@@ -454,28 +450,9 @@
         onerror: () => { busy = false; fail('No connection'); }
       });
     }
-    btnRefresh.onclick = () => refresh(true);
+    btnRefresh.onclick = () => refresh();
 
-    // expanding the window refreshes (at most once per 1 minute)
-    const OPEN_GAP = 60 * 1000;
-    btnToggle.addEventListener('click', () => { if (!collapsed) refresh(true, OPEN_GAP); });
-    head.addEventListener('dblclick', e => {
-      if (!e.target.closest('button, a') && !collapsed) refresh(true, OPEN_GAP);
-    });
-    // coming back to the tab: only if the data is older than ~12 min
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-    window.addEventListener('focus', () => refresh());
-
-    // 15-minute loop with a little random spread; after errors it retries sooner (2, 4, 8 ... min)
-    function schedule() {
-      const wait = failures ? Math.min(120000 * Math.pow(2, failures - 1), POLL_MS) : POLL_MS;
-      setTimeout(() => {
-        if (!document.hidden) refresh();
-        schedule();
-      }, wait * (0.9 + Math.random() * 0.2));
-    }
-
-    // show the last known data immediately (no waiting on every page change)
+    // show the last known data immediately (page changes do not request anything)
     let saved = null;
     try { saved = JSON.parse(GM_getValue('panelData', 'null')); } catch (e) {}
     if (saved && saved.data) {
@@ -487,10 +464,16 @@
     } else {
       showMsg('Loading…');
     }
-    refresh();      // goes out only if the saved data is older than ~12 min
-    schedule();
 
-    panelApi = { refresh };
+    // first visit in this browser tab (or nothing saved yet): refresh once
+    let firstVisit = true;
+    try {
+      firstVisit = !sessionStorage.getItem('hospitalPanelSeen');
+      sessionStorage.setItem('hospitalPanelSeen', '1');
+    } catch (e) {}
+    if (firstVisit || !hasData) refresh(30000);   // not if the data is fresher than 30 s (e.g. a second tab opened right away)
+
+    panelApi = { refresh: () => refresh() };
   }
 
   if (SHOW_PANEL && window.top === window.self) initPanel();

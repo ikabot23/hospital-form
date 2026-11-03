@@ -118,7 +118,7 @@ function fmtTotal() {
 
 // Черновик: выбранный получатель и сумма (хранится 30 минут)
 function saveDraft() {
-  lsSet('draft', JSON.stringify({ r: $('recipient').value, t: $('total').value, ts: Date.now() }));
+  lsSet('draft', JSON.stringify({ t: $('total').value, ts: Date.now() }));
 }
 function loadDraft() {
   try {
@@ -220,7 +220,7 @@ function render(d) {
   data = d;
   const draft = loadDraft();
   const curP = $('player').value || lsGet('player');
-  const curR = $('recipient').value || (draft && draft.r) || '';
+  const curR = '';   // всегда выбирать заново
   fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
   fillSelect($('recipient'),
     d.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
@@ -313,16 +313,17 @@ $('send').onclick = () => {
   api({ action: 'save', token, player, recipient: rec, total })
     .then(r => {
       saving = false;
-      if (r.status === 'ok') {
-        msg('Saved: +' + fmt(total) + ' → ' + rec);
-        $('total').value = '';
-        saveDraft();
-        pushAmt(total);
-        lastJson = JSON.stringify(r.data);
-        lsSet('formCache', lastJson);
-        lastLoad = Date.now();
-        render(r.data);
-      }
+     if (r.status === 'ok') {
+  msg('Saved: +' + fmt(total) + ' → ' + rec);
+  $('total').value = '';
+  $('recipient').value = '';   // сброс получателя
+  saveDraft();
+  pushAmt(total);
+  lastJson = JSON.stringify(r.data);
+  lsSet('formCache', lastJson);
+  lastLoad = Date.now();
+  render(r.data);
+}
       else if (r.status === 'forbidden') askToken('Wrong secret code');
       else msg('Error: ' + err(r.status));
       updateSend();

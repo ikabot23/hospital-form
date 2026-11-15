@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Travian: hospital shipments -> Google Sheets
 // @namespace    travian-sheet-sender
-// @version      2.5
+// @version      2.6
 // @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests (mobile-friendly)
 // @include      https://*.europe.travian.*/*
 // @include      https://*.international.travian.*/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[Sheet] script loaded (multi-lang v2.5)');
+  console.log('[Sheet] script loaded (multi-lang v2.6)');
   const WEB_APP = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
   const FORM_URL = 'https://ikabot23.github.io/hospital-form';
   const SHOW_PANEL = true;              // false = hide the floating window
@@ -206,7 +206,7 @@
     const style = document.createElement('style');
     style.textContent = `
       .box{font:11px/1.3 system-ui,sans-serif;color:#222;background:#f4efe3;border:1px solid #8a7a55;
-           border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);width:220px;overflow:hidden}
+           border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);width:max-content;min-width:130px;max-width:220px;overflow:hidden}
       .head{display:flex;align-items:center;gap:2px;padding:3px 6px;background:#5c4a28;color:#fff;
             cursor:move;user-select:none;touch-action:none}
       .ttl{flex:1;min-width:0;line-height:1.2}
@@ -228,7 +228,7 @@
     `;
     // bigger version for phones (tap targets ~40px)
     if (MOBILE) style.textContent += `
-      .box{width:min(300px,88vw);font-size:14px}
+      .box{width:max-content;min-width:170px;max-width:min(300px,88vw);font-size:14px}
       .head{padding:7px 8px;gap:4px}
       .ttl b{font-size:15px}
       .ttl small{font-size:12px}

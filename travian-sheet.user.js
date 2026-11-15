@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Travian: hospital shipments -> Google Sheets
 // @namespace    travian-sheet-sender
-// @version      2.3
-// @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests
+// @version      2.4
+// @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests (mobile-friendly)
 // @include      https://*.europe.travian.*/*
 // @include      https://*.international.travian.*/*
 // @grant        GM_xmlhttpRequest
@@ -15,19 +15,15 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[Sheet] script loaded (multi-lang v2.3)');
-
+  console.log('[Sheet] script loaded (multi-lang v2.4)');
   const WEB_APP = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
   const FORM_URL = 'https://ikabot23.github.io/hospital-form';
   const SHOW_PANEL = true;              // false = hide the floating window
   const PANEL_MODE = 'page';            // 'page'  = like ResourceBar+ (absolute in <body>, moves with the page)
                                         // 'fixed' = glued to the screen (stays in place while scrolling)
   const REFRESH_AFTER_SHIPMENT = false; // true = also refresh the window after you send resources
-
   const clean = s => String(s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim();
-
   let panelApi = null;   // set by the floating window
-
   function getToken() {
     let t = GM_getValue('token');
     if (!t) {
@@ -36,7 +32,6 @@
     }
     return t;
   }
-
   function getPlayer() {
     const el = document.querySelector('#sidebarBoxActiveVillage .playerName');
     const fromPage = el && clean(el.textContent);
@@ -48,7 +43,6 @@
     }
     return p;
   }
-
   function getRecipient() {
     // old browsers do not understand :has(), so the lookup is wrapped in try/catch
     let form = null;
@@ -76,7 +70,6 @@
     }
     return null;
   }
-
   function getTotal() {
     const val = n => Number(
       (document.querySelector(`input[name="${n}"]`)?.value || '').replace(/\D/g, '')
@@ -85,7 +78,6 @@
     if (total > 0) return total;
     return val('r1') + val('r2') + val('r3') + val('r4');
   }
-
   function toast(text) {
     const t = document.createElement('div');
     t.textContent = text;
@@ -94,7 +86,6 @@
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 6000);
   }
-
   function report(data) {
     const player = getPlayer();
     const token = getToken();
@@ -125,19 +116,15 @@
       onerror: () => toast('Could not reach the sheet')
     });
   }
-
   // Is this the real "Send" button (not + / -)
   function isSendButton(btn) {
     if (!btn) return false;
-
     // Classic submit
     if (btn.matches('button[type="submit"], input[type="submit"]')) return true;
-
     // Common name/id of the send button in Travian
     const name = (btn.getAttribute('name') || '').toLowerCase();
     const id = (btn.id || '').toLowerCase();
     if (name === 's1' || id.includes('enabledbutton') || id.includes('btn_ok')) return true;
-
     // Button text: not plus/minus and not "cancel"
     const text = clean(btn.textContent || btn.value || '').toLowerCase();
     if (!text) return false;
@@ -145,28 +132,22 @@
     if (['cancel', 'отмена', 'annuler', 'abbrechen', 'annulla', 'anuluj', 'zurück', 'back'].some(w => text.includes(w))) {
       return false;
     }
-
     // A plain type="button" with a very short text is most likely +/-
     if (btn.type === 'button' && text.length <= 2) return false;
-
     return false; // by default it is not a send button
   }
-
   // One shipment is recorded once even if both submit and click fire
   let lastKey = '', lastAt = 0;
-
   function tryReportFromForm(form) {
     if (!form) return;
     const hasResources = form.querySelector(
       'input[name="lumber"], input[name="clay"], input[name="iron"], input[name="crop"], input[name="r1"]'
     );
     if (!hasResources) return;
-
     const recipient = getRecipient();
     const total = getTotal();
     console.log('[Sheet] recipient:', recipient, 'total:', total);
     if (!recipient || !total) return;
-
     const key = recipient + '|' + total;
     if (key === lastKey && Date.now() - lastAt < 4000) {
       console.log('[Sheet] duplicate ignored');
@@ -174,26 +155,21 @@
     }
     lastKey = key;
     lastAt = Date.now();
-
     report({ recipient, total });
   }
-
   // 1. Main way: the form submit event (language does not matter)
   document.addEventListener('submit', e => {
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
     tryReportFromForm(form);
   }, true);
-
   // 2. Fallback: a click on the real send button
   document.addEventListener('click', e => {
     const btn = e.target.closest('button, input[type="submit"]');
     if (!btn || !isSendButton(btn)) return;
-
     const form = btn.closest('form');
     tryReportFromForm(form);
   }, true);
-
   // Time shown by the game clock (the "9:50:12 (UTC)" box); falls back to the computer clock
   function gameTimeLabel() {
     const RE = /(\d{1,2}):(\d{2})(?::\d{2})?\s*\(?\s*((?:UTC|GMT)(?:\s?[+\-\u2212]\s?\d{1,2}(?::\d{2})?)?)\s*\)?/i;
@@ -210,16 +186,15 @@
     if (best) return best.m[1] + ':' + best.m[2] + ' ' + best.m[3].replace(/\s+/g, '').toUpperCase();
     return new Date().toTimeString().slice(0, 5);
   }
-
   // ================= Floating window with active requests =================
   function initPanel() {
     if (document.getElementById('hospital-panel-host')) return;   // already created (e.g. a second copy of the script)
-
     const PAGE = PANEL_MODE === 'page';
+    // touch screen / narrow screen -> bigger window and bigger buttons
+    const MOBILE = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 700;
     const fmt = n => Number(n).toLocaleString('en-US');
     const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
     const isActive = r => r.need > 0 && r.need - r.got > 0;
-
     const host = document.createElement('div');
     host.id = 'hospital-panel-host';
     host.style.cssText = PAGE
@@ -228,7 +203,6 @@
       : 'position:fixed;z-index:2147483000;left:0;top:0;right:auto;bottom:auto;margin:0;padding:0;border:0;' +
         'background:none;overflow:visible;width:auto;height:auto;max-width:none;max-height:none;';
     const shadow = host.attachShadow({ mode: 'open' });   // game CSS cannot affect the window
-
     const style = document.createElement('style');
     style.textContent = `
       .box{font:11px/1.3 system-ui,sans-serif;color:#222;background:#f4efe3;border:1px solid #8a7a55;
@@ -252,7 +226,22 @@
       .msg button{margin-top:4px;padding:3px 8px;font-size:11px;cursor:pointer}
       .hide .list{display:none}
     `;
-
+    // bigger version for phones (tap targets ~40px)
+    if (MOBILE) style.textContent += `
+      .box{width:min(300px,88vw);font-size:14px}
+      .head{padding:7px 8px;gap:4px}
+      .ttl b{font-size:15px}
+      .ttl small{font-size:12px}
+      .head button,.head a.btn{padding:6px 12px;font-size:24px;min-width:26px;text-align:center}
+      .list{padding:2px 10px}
+      .row{padding:9px 0}
+      .top{font-size:15px}
+      .name{padding:4px 0}
+      .bar{height:8px;margin:5px 0}
+      .sub{font-size:13px}
+      .msg{font-size:14px}
+      .msg button{padding:9px 16px;font-size:15px}
+    `;
     const box = el('div', 'box');
     const head = el('div', 'head');
     const ttl = el('div', 'ttl');
@@ -270,7 +259,6 @@
     const list = el('div', 'list');
     box.append(head, list);
     shadow.append(style, box);
-
     if (PAGE) {
       document.body.appendChild(host);            // exactly like ResourceBar+
     } else {
@@ -278,7 +266,6 @@
       try { host.setAttribute('popover', 'manual'); host.showPopover(); }
       catch (e) { host.removeAttribute('popover'); }
     }
-
     // ----- position (drag with mouse or finger) -----
     const POS_KEY = 'panelPos_' + PANEL_MODE;   // page and screen coordinates differ, so they are saved separately
     let px = 0, py = 0;
@@ -294,7 +281,6 @@
     try { pos = JSON.parse(GM_getValue(POS_KEY, 'null')); } catch (e) {}
     place(pos ? pos.x : window.innerWidth - 240, pos ? pos.y : 110);
     window.addEventListener('resize', () => place(px, py));
-
     const pt = e => PAGE ? [e.pageX, e.pageY] : [e.clientX, e.clientY];
     let drag = null;
     head.addEventListener('pointerdown', e => {
@@ -313,7 +299,6 @@
       drag = null;
       GM_setValue(POS_KEY, JSON.stringify({ x: px, y: py }));
     });
-
     // Screen mode only: keeps the window glued to the screen even if the game's CSS makes "fixed" elements scroll
     if (!PAGE) {
       const pin = () => {
@@ -329,9 +314,8 @@
       window.addEventListener('resize', pin);
       setInterval(pin, 1000);
     }
-    console.log('[Sheet] panel mode:', PANEL_MODE,
+    console.log('[Sheet] panel mode:', PANEL_MODE, '| mobile:', MOBILE,
       '| scrolling element:', document.scrollingElement && document.scrollingElement.tagName);
-
     // ----- collapse / expand (does not refresh anything) -----
     let collapsed = GM_getValue('panelCollapsed', window.innerWidth < 700);
     function applyCollapsed() {
@@ -340,9 +324,9 @@
     }
     function toggle() { collapsed = !collapsed; GM_setValue('panelCollapsed', collapsed); applyCollapsed(); }
     btnToggle.onclick = toggle;
-    head.addEventListener('dblclick', e => { if (!e.target.closest('button, a')) toggle(); });
+    // phone: one tap on the header collapses/expands; desktop: double click
+    head.addEventListener(MOBILE ? 'click' : 'dblclick', e => { if (!e.target.closest('button, a')) toggle(); });
     applyCollapsed();
-
     // ----- content -----
     function setHeader(d, label) {
       if (d) {
@@ -353,7 +337,6 @@
       }
       upd.textContent = label ? 'updated ' + label : '';
     }
-
     function showMsg(text, askCode) {
       setHeader(null, '');
       list.textContent = '';
@@ -367,7 +350,6 @@
       }
       list.append(m);
     }
-
     function render(d, label) {
       setHeader(d, label);
       list.textContent = '';
@@ -381,10 +363,8 @@
       active.forEach(r => {
         const left = r.need - r.got;
         const pct = Math.min(99, Math.floor(r.got / r.need * 100));
-
         const row = el('div', 'row');
         row.title = fmt(r.got) + ' / ' + fmt(r.need);
-
         const top = el('div', 'top');
         let name;
         if (r.link && /^https?:\/\//i.test(r.link)) {
@@ -396,29 +376,23 @@
         name.textContent = r.name;
         const p = el('span'); p.textContent = pct + '%';
         top.append(name, p);
-
         const bar = el('div', 'bar');
         const fill = el('i');
         fill.style.width = pct + '%';
         if (r.color) fill.style.background = r.color;
         bar.append(fill);
-
         const sub = el('div', 'sub');
         sub.textContent = fmt(left) + ' left of ' + fmt(r.need);
-
         row.append(top, bar, sub);
         list.append(row);
       });
     }
-
     // ----- data: refreshed only with the ↻ button and on the first visit in a browser tab -----
     let cachedAt = 0, busy = false, hasData = false;
-
     function fail(text) {
       if (hasData) upd.textContent = text + ' - press ↻';        // keep the last data on screen
       else showMsg(text + ' - press ↻ to retry');
     }
-
     // minGap: skip the request if the saved data is fresher than this many milliseconds
     function refresh(minGap) {
       const token = GM_getValue('token');
@@ -451,7 +425,6 @@
       });
     }
     btnRefresh.onclick = () => refresh();
-
     // show the last known data immediately (page changes do not request anything)
     let saved = null;
     try { saved = JSON.parse(GM_getValue('panelData', 'null')); } catch (e) {}
@@ -464,17 +437,17 @@
     } else {
       showMsg('Loading…');
     }
-
     // first visit in this browser tab (or nothing saved yet): refresh once
     let firstVisit = true;
     try {
       firstVisit = !sessionStorage.getItem('hospitalPanelSeen');
       sessionStorage.setItem('hospitalPanelSeen', '1');
     } catch (e) {}
-    if (firstVisit || !hasData) refresh(30000);   // not if the data is fresher than 30 s (e.g. a second tab opened right away)
-
+    if (firstVisit || !hasData) {
+      // небольшая задержка, чтобы игровые часы успели появиться в DOM
+      setTimeout(() => refresh(30000), 600);
+    }
     panelApi = { refresh: () => refresh() };
   }
-
   if (SHOW_PANEL && window.top === window.self) initPanel();
 })();

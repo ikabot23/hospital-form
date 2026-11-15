@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Travian: hospital shipments -> Google Sheets
 // @namespace    travian-sheet-sender
-// @version      2.4
+// @version      2.5
 // @description  Logs resources you send to an alliance hospital request into the shared sheet, plus a compact floating window with active requests (mobile-friendly)
 // @include      https://*.europe.travian.*/*
 // @include      https://*.international.travian.*/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[Sheet] script loaded (multi-lang v2.4)');
+  console.log('[Sheet] script loaded (multi-lang v2.5)');
   const WEB_APP = 'https://script.google.com/macros/s/AKfycbxllR_kHm99Df_xNA0PMz5kkVBiqzEjbrlsrRSWIb0zO9Bi7Pmbpg-sZJb9kS0heYFQ7Q/exec';
   const FORM_URL = 'https://ikabot23.github.io/hospital-form';
   const SHOW_PANEL = true;              // false = hide the floating window
@@ -245,17 +245,14 @@
     const box = el('div', 'box');
     const head = el('div', 'head');
     const ttl = el('div', 'ttl');
-    const b = el('b'); b.textContent = '🏥 Hospital ';
+    const b = el('b'); b.textContent = '🏥 ';
     const cnt = el('span');            // "[3 requests]"
     b.append(cnt);
     const upd = el('small');           // "updated 9:50 UTC"
     ttl.append(b, upd);
-    const btnLog = el('a', 'btn');
-    btnLog.textContent = '+'; btnLog.title = 'Log a shipment (form)';
-    btnLog.href = FORM_URL; btnLog.target = '_blank'; btnLog.rel = 'noopener';
     const btnRefresh = el('button'); btnRefresh.textContent = '↻'; btnRefresh.title = 'Refresh';
     const btnToggle = el('button'); btnToggle.title = 'Collapse / expand';
-    head.append(ttl, btnLog, btnRefresh, btnToggle);
+    head.append(ttl, btnRefresh, btnToggle);
     const list = el('div', 'list');
     box.append(head, list);
     shadow.append(style, box);

@@ -21,6 +21,7 @@
   .card{background:#fff;border-radius:8px;padding:10px;margin:8px 0}
   .card.rec{border-left:6px solid #ddd}
   .card.off{opacity:.5;text-decoration:line-through}
+  .card.pend{opacity:.75}
   .bar{height:8px;background:#ddd;border-radius:4px;overflow:hidden;margin-top:6px}
   .bar i{display:block;height:100%;background:#4a7c1f}
   .small{font-size:13px;color:#666;margin-top:4px}
@@ -78,7 +79,8 @@ const ERR = {
   'sheet not found': 'Sheet tab not found',
   'bad amount': 'Enter a valid amount',
   'nothing to undo': 'Nothing to undo',
-  'cell not found': 'Cell not found in the sheet'
+  'cell not found': 'Cell not found in the sheet',
+  'busy': 'Server is busy, try again'
 };
 const err = s => ERR[s] || s;
 
@@ -89,10 +91,13 @@ const spaced = s => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');   // 100000
 const totalNum = () => Number(digits($('total').value)) || 0;
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const newRid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
 let token = lsGet('token');
-let data = null;
+let data = null;        // что показываем: серверные данные + неотправленные записи
+let srv = null;         // последние серверные данные
 let busy = false;
-let saving = false;
+let again = false;      // после текущей загрузки нужна ещё одна (принудительная)
 let lastLoad = 0;
 let lastJson = '';
 
@@ -100,7 +105,7 @@ function msg(t) { $('msg').textContent = t; }
 
 // Кнопка активна только когда выбраны ник, заявка и введена сумма
 function updateSend() {
-  $('send').disabled = saving || !($('player').value && $('recipient').value && totalNum() > 0);
+  $('send').disabled = !($('player').value && $('recipient').value && totalNum() > 0);
 }
 
 // Формат суммы при вводе: 1 000 000 (курсор не прыгает)
@@ -116,7 +121,7 @@ function fmtTotal() {
   updateSend();
 }
 
-// Черновик: выбранный получатель и сумма (хранится 30 минут)
+// Черновик: введённая сумма (хранится 30 минут)
 function saveDraft() {
   lsSet('draft', JSON.stringify({ t: $('total').value, ts: Date.now() }));
 }
@@ -153,11 +158,56 @@ function canRefresh() {
   return !(tag === 'SELECT' || tag === 'INPUT');
 }
 
+// ---------- Очередь неотправленных записей (outbox) ----------
+const outbox = () => { try { return JSON.parse(lsGet('outbox') || '[]'); } catch (e) { return []; } };
+const setOutbox = a => lsSet('outbox', JSON.stringify(a));
+
+// Поверх серверных данных показываем то, что ещё не доставлено
+function withPending(d) {
+  const q = outbox();
+  if (!q.length) return d;
+  const v = JSON.parse(JSON.stringify(d));
+  q.forEach(it => {
+    const r = v.requests.find(x => x.name === it.recipient);
+    if (r) r.got += it.total;
+    v.recent.unshift({ time: it.time, player: it.player, to: it.recipient, total: it.total, pending: true });
+  });
+  v.recent = v.recent.slice(0, 5);
+  return v;
+}
+
+let flushing = false;
+async function flush() {
+  if (flushing || !token) return;
+  flushing = true;
+  let failed = false, sent = false;
+  try {
+    while (true) {
+      const q = outbox();
+      if (!q.length) break;
+      const it = q[0];
+      let r;
+      try { r = await api(it); } catch (e) { failed = true; break; }
+      if (r.status === 'busy') { failed = true; break; }
+      if (r.status === 'forbidden') { askToken('Wrong secret code'); return; }
+      setOutbox(outbox().filter(x => x.rid !== it.rid));
+      sent = true;
+      if (r.status === 'ok') {
+        api({ action: 'notify', token, rid: it.rid }).catch(() => {});   // Discord: не ждём
+      } else {
+        msg('Error: ' + err(r.status) + ' (' + fmt(it.total) + ' → ' + it.recipient + ' was not saved)');
+      }
+    }
+  } finally {
+    flushing = false;
+  }
+  if (failed) setTimeout(flush, 10000);
+  else if (sent && !(document.activeElement && document.activeElement.tagName === 'SELECT')) load(true, true);
+}
+
 // Up to 3 attempts; a unique id (rid) makes repeated save/undo requests safe
 async function api(body) {
-  const payload = (body.action === 'save' || body.action === 'undo')
-    ? { ...body, rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8) }
-    : body;
+  const payload = (body.action === 'undo' && !body.rid) ? { ...body, rid: newRid() } : body;
   let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -192,9 +242,10 @@ function fillSelect(sel, items, cur, placeholder) {
 }
 
 // silent = фоновое обновление без надписи «Loading…»
-function load(silent) {
+// force = перерисовать, даже если данные те же (убрать пометки «sending…»), выбранную заявку не сбрасывать
+function load(silent, force) {
   if (!token) return askToken('');
-  if (busy) return;
+  if (busy) { if (force) again = true; return; }
   busy = true;
   $('tokenBox').hidden = true;
   $('main').hidden = false;
@@ -205,41 +256,44 @@ function load(silent) {
       lastLoad = Date.now();
       if (d.error) return render(d);
       const s = JSON.stringify(d);
-      if (s !== lastJson) {          // перерисовываем, только если данные изменились
+      if (s !== lastJson || force) {   // перерисовываем, только если данные изменились
         lastJson = s;
         lsSet('formCache', s);
-        render(d);
+        render(d, force);
       }
     })
     .catch(e => { if (!silent) $('status').textContent = 'Error: ' + e.message; })
-    .finally(() => { busy = false; });
+    .finally(() => {
+      busy = false;
+      if (again) { again = false; load(true, true); }
+    });
 }
 
-function render(d) {
+function render(d, keepSel) {
   if (d.error) return askToken('Wrong secret code (server version ' + d.ver + ')');
-  data = d;
-  const draft = loadDraft();
+  srv = d;
+  data = withPending(d);
   const curP = $('player').value || lsGet('player');
-  const curR = '';   // всегда выбирать заново
-  fillSelect($('player'), d.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
+  const curR = keepSel ? $('recipient').value : '';   // по умолчанию всегда выбирать заново
+  fillSelect($('player'), data.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
   fillSelect($('recipient'),
-    d.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
+    data.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
     curR, '— select request —');
   showInfo();
   showChips();
 
   // цвета заявок: имя -> цвет заливки из таблицы
   const colors = {};
-  d.requests.forEach(r => { if (r.color) colors[r.name.trim().toLowerCase()] = r.color; });
+  data.requests.forEach(r => { if (r.color) colors[r.name.trim().toLowerCase()] = r.color; });
 
   // последние записи: боковая полоска в цвет получателя
   const rc = $('recent'); rc.innerHTML = '';
-  if (!d.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
-  d.recent.forEach(r => {
+  if (!data.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
+  data.recent.forEach(r => {
     const div = document.createElement('div');
-    div.className = 'card rec' + (r.cancelled ? ' off' : '');
+    div.className = 'card rec' + (r.cancelled ? ' off' : '') + (r.pending ? ' pend' : '');
     div.textContent = r.time + ' · ' + r.player + ' → ' + r.to + ': ' + fmt(r.total) +
-      (r.cancelled ? ' (cancelled)' : '');
+      (r.cancelled ? ' (cancelled)' : '') + (r.pending ? ' · sending…' : '');
     const col = colors[r.to.trim().toLowerCase()];
     if (col) div.style.borderLeftColor = col;
     rc.appendChild(div);
@@ -247,7 +301,7 @@ function render(d) {
 
   // заявки: полоска прогресса в цвет ячейки
   const rq = $('reqs'); rq.innerHTML = '';
-  d.requests.forEach(r => {
+  data.requests.forEach(r => {
     const div = document.createElement('div');
     div.className = 'card';
     const pct = r.need ? Math.min(100, Math.round(r.got / r.need * 100)) : 0;
@@ -290,8 +344,9 @@ $('tokenSave').onclick = () => {
   lsSet('token', t);
   $('tokMsg').textContent = '';
   load();
+  flush();
 };
-$('player').onchange = () => { lsSet('player', $('player').value); if (data) render(data); updateSend(); };
+$('player').onchange = () => { lsSet('player', $('player').value); if (srv) render(srv); updateSend(); };
 $('recipient').onchange = () => {
   showInfo();
   saveDraft();
@@ -303,32 +358,26 @@ $('total').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); $('send').click(); }   // «Готово» на клавиатуре сохраняет
 });
 
+// Сохранение мгновенное: запись попадает в очередь и сразу видна, на сервер уходит в фоне
 $('send').onclick = () => {
   const player = $('player').value, rec = $('recipient').value;
   const total = totalNum();
   if (!player || !rec || !total) return msg('Select your nickname and a request, then enter an amount');
   lsSet('player', player);
-  saving = true; updateSend();
-  msg('Saving…');
-  api({ action: 'save', token, player, recipient: rec, total })
-    .then(r => {
-      saving = false;
-     if (r.status === 'ok') {
+
+  const t = new Date(), p = n => String(n).padStart(2, '0');
+  setOutbox(outbox().concat({
+    action: 'save', token, player, recipient: rec, total, rid: newRid(),
+    time: p(t.getDate()) + '.' + p(t.getMonth() + 1) + ' ' + p(t.getHours()) + ':' + p(t.getMinutes())
+  }));
+
   msg('Saved: +' + fmt(total) + ' → ' + rec);
   $('total').value = '';
   $('recipient').value = '';   // сброс получателя
   saveDraft();
   pushAmt(total);
-  lastJson = JSON.stringify(r.data);
-  lsSet('formCache', lastJson);
-  lastLoad = Date.now();
-  render(r.data);
-}
-      else if (r.status === 'forbidden') askToken('Wrong secret code');
-      else msg('Error: ' + err(r.status));
-      updateSend();
-    })
-    .catch(e => { saving = false; updateSend(); msg('Error: ' + e.message); });
+  if (srv) render(srv); else updateSend();
+  flush();
 };
 
 let armed = false;
@@ -342,6 +391,11 @@ $('undo').onclick = () => {
     return;
   }
   armed = false; $('undo').textContent = UNDO_TEXT;
+  if (outbox().length) {   // отмена не должна обгонять ещё не отправленную запись
+    msg('Wait until your entries are synced, then try again');
+    flush();
+    return;
+  }
   msg('Undoing…');
   api({ action: 'undo', token, player })
     .then(r => {
@@ -362,12 +416,16 @@ setInterval(() => {
   load(true);
 }, 60000);
 
-// Вернулись на вкладку: обновляем данные (если старше 2 минут) и ставим курсор в поле суммы
+// Вернулись на вкладку: досылаем очередь, обновляем данные (если старше 2 минут) и ставим курсор в поле суммы
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !token) return;
+  flush();
   if (canRefresh() && Date.now() - lastLoad > 120000) load(true);
   if ($('recipient').value && !$('total').value && !$('main').hidden) $('total').focus();
 });
+
+// Появилась сеть: досылаем очередь
+window.addEventListener('online', flush);
 
 // Сразу показываем данные прошлого визита и черновик, свежие подгружаются фоном
 showChips();
@@ -386,6 +444,7 @@ if (token) {
 }
 updateSend();
 load();
+flush();   // досылаем записи, не ушедшие в прошлый раз
 </script>
 </body>
 </html>

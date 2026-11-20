@@ -7,6 +7,25 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function (OneSignal) {
+    // папка, где лежит страница (для GitHub Pages: /имя-репозитория/)
+    const base = location.pathname.replace(/[^/]*$/, '');
+    await OneSignal.init({
+      appId: 'e0bce331-a09e-4bb2-a8bd-002f106fc210',
+      serviceWorkerPath: base + 'sw.js',
+      serviceWorkerParam: { scope: base }
+    });
+    const btn = document.getElementById('notif');
+    if (!btn) return;
+    const upd = () => { btn.hidden = !!OneSignal.Notifications.permission; };
+    upd();
+    OneSignal.Notifications.addEventListener('permissionChange', upd);
+    btn.onclick = () => OneSignal.Notifications.requestPermission();
+  });
+</script>
 <link rel="preconnect" href="https://script.google.com">
 <link rel="preconnect" href="https://script.googleusercontent.com">
 <title>Hospital: log your shipment</title>
@@ -44,6 +63,7 @@
 </div>
 
 <div id="main" hidden>
+  <button id="notif" type="button" hidden>🔔 Enable notifications</button>
   <label>Your nickname</label>
   <select id="player"></select>
 
@@ -95,6 +115,16 @@ const totalNum = () => Number(digits($('total').value)) || 0;
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 const newRid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// Бейдж на иконке приложения: число открытых заявок (ещё не собрано полностью)
+function updateBadge(list) {
+  try {
+    if (!('setAppBadge' in navigator)) return;
+    const n = list.filter(r => r.need - r.got > 0).length;
+    const p = n ? navigator.setAppBadge(n) : navigator.clearAppBadge();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
 
 let token = lsGet('token');
 let data = null;        // что показываем: серверные данные + неотправленные записи
@@ -233,6 +263,7 @@ async function api(body) {
 
 function askToken(text) {
   token = ''; lsSet('token', ''); lsSet('formCache', ''); lastJson = '';
+  try { if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); } catch (e) {}
   $('tokMsg').textContent = text || '';
   $('tokenBox').hidden = false;
   $('main').hidden = true;
@@ -320,6 +351,7 @@ function render(d, keepSel) {
     rq.appendChild(div);
   });
 
+  updateBadge(data.requests);
   updateSend();
 }
 

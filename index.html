@@ -8,19 +8,23 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function (OneSignal) {
-    // папка, где лежит страница (для GitHub Pages: /имя-репозитория/)
-    const base = location.pathname.replace(/[^/]*$/, '');
     await OneSignal.init({
-      appId: 'e0bce331-a09e-4bb2-a8bd-002f106fc210',
-      serviceWorkerPath: base + 'sw.js',
-      serviceWorkerParam: { scope: base }
+      appId: "e0bce331-a09e-4bb2-a8bd-002f106fc210",
+      serviceWorkerPath: "sw.js",
+      serviceWorkerParam: { scope: "/hospital-form/" },
+      allowLocalhostAsSecureOrigin: true
     });
+
     const btn = document.getElementById('notif');
     if (!btn) return;
-    const upd = () => { btn.hidden = !!OneSignal.Notifications.permission; };
+
+    const upd = () => {
+      btn.hidden = OneSignal.Notifications.permission === true;
+    };
     upd();
     OneSignal.Notifications.addEventListener('permissionChange', upd);
     btn.onclick = () => OneSignal.Notifications.requestPermission();

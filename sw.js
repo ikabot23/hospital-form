@@ -1,3 +1,6 @@
+// OneSignal Web Push (must be the first line)
+importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
+
 // Network-first for the page itself: updates arrive immediately,
 // the cache is only a fallback when there is no connection.
 const CACHE = 'hospital-v1';

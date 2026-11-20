@@ -9,26 +9,28 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: "e0bce331-a09e-4bb2-a8bd-002f106fc210",
-      safari_web_id: "web.onesignal.auto.48d27e8c-5bf0-4f8f-a083-e09c208eb2cb",
-      notifyButton: {
-        enable: true,
-      },
-    });
-
-    const btn = document.getElementById('notif');
-    if (!btn) return;
-
-    const upd = () => {
-      btn.hidden = OneSignal.Notifications.permission === true;
-    };
-    upd();
-    OneSignal.Notifications.addEventListener('permissionChange', upd);
-    btn.onclick = () => OneSignal.Notifications.requestPermission();
+ window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function(OneSignal) {
+  await OneSignal.init({
+    appId: "e0bce331-a09e-4bb2-a8bd-002f106fc210",
+    safari_web_id: "web.onesignal.auto.48d27e8c-5bf0-4f8f-a083-e09c208eb2cb",
+    serviceWorkerPath: "sw.js",
+    serviceWorkerParam: { scope: "/hospital-form/" },
+    notifyButton: {
+      enable: true,
+    },
   });
+
+  const btn = document.getElementById('notif');
+  if (!btn) return;
+
+  const upd = () => {
+    btn.hidden = OneSignal.Notifications.permission === true;
+  };
+  upd();
+  OneSignal.Notifications.addEventListener('permissionChange', upd);
+  btn.onclick = () => OneSignal.Notifications.requestPermission();
+});
 </script>
 <link rel="preconnect" href="https://script.google.com">
 <link rel="preconnect" href="https://script.googleusercontent.com">

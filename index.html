@@ -2,14 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f4efe3">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://script.google.com">
 <link rel="preconnect" href="https://script.googleusercontent.com">
 <title>Hospital: log your shipment</title>
 <style>
   html{background:#f4efe3;min-height:100%}
-  body{font-family:system-ui,sans-serif;margin:0 auto;padding:16px 16px 60px;background:#f4efe3;color:#222;min-height:100vh;max-width:520px}
+  body{font-family:system-ui,sans-serif;margin:0 auto;padding:max(16px, env(safe-area-inset-top)) 16px max(60px, env(safe-area-inset-bottom));background:#f4efe3;color:#222;min-height:100vh;max-width:520px}
   h1{font-size:20px;margin:0 0 8px}
   h3{margin:20px 0 6px;font-size:16px}
   label{display:block;margin:12px 0 4px;font-size:14px;color:#555}
@@ -446,6 +449,10 @@ if (token) {
 updateSend();
 load();
 flush();   // досылаем записи, не ушедшие в прошлый раз
+</script>
+<script>
+  // PWA: service worker для установки формы как приложения
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>

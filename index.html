@@ -23,21 +23,18 @@
           await OneSignal.Notifications.requestPermission();
         await OneSignal.User.PushSubscription.optIn();
 
-        // ТЕСТ: пробуем оформить push-подписку напрямую и показываем ошибку браузера
-        let out = 'permission: ' + Notification.permission;
-        try {
-          const reg = await navigator.serviceWorker.getRegistration('/hospital-form/');
-          const key = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
-          const pad = '='.repeat((4 - key.length % 4) % 4);
-          const raw = atob((key + pad).replace(/-/g, '+').replace(/_/g, '/'));
-          const arr = Uint8Array.from(raw, c => c.charCodeAt(0));
-          const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: arr });
-          out += '\nsubscribe: OK';
-          await sub.unsubscribe();
-        } catch (e) {
-          out += '\nsubscribe error: ' + e.name + ': ' + e.message;
-        }
-        alert(out);
+        // Диагностика: ждём id подписки (до 10 с) и показываем состояние
+        const s = OneSignal.User.PushSubscription;
+        for (let i = 0; i < 10 && !s.id; i++) await new Promise(r => setTimeout(r, 1000));
+        const reg = await navigator.serviceWorker.getRegistration('/hospital-form/');
+        const bsub = (reg && reg.pushManager) ? await reg.pushManager.getSubscription() : null;
+        alert(
+          'id: ' + s.id +
+          '\ntoken: ' + (s.token ? 'yes' : 'NO') +
+          '\nSW: ' + (reg ? (reg.active ? 'active' : 'not active') : 'none') +
+          '\nSW url: ' + (reg && reg.active ? reg.active.scriptURL.replace(location.origin, '') : '-') +
+          '\nbrowserSub: ' + (bsub ? 'yes' : 'NO')
+        );
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));
       }
@@ -517,10 +514,6 @@ if (token) {
 updateSend();
 load();
 flush();   // досылаем записи, не ушедшие в прошлый раз
-</script>
-<script>
-  // PWA: service worker для установки формы как приложения
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>

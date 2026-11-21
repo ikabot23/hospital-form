@@ -19,7 +19,10 @@
       if (Notification.permission === 'denied')
         return alert('Notifications are blocked for this site in browser/phone settings');
       try {
-        await OneSignal.Notifications.requestPermission();
+        if (Notification.permission !== 'granted')
+          await OneSignal.Notifications.requestPermission();
+        await OneSignal.User.PushSubscription.optIn();
+        alert('Subscribed: ' + OneSignal.User.PushSubscription.optedIn);
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));
       }
@@ -37,10 +40,10 @@
       initErr = e && e.message ? e.message : String(e);
     }
 
-    const upd = () => { btn.hidden = OneSignal.Notifications.permission === true; };
     if (ready) {
+      const upd = () => { btn.hidden = OneSignal.User.PushSubscription.optedIn === true; };
       upd();
-      OneSignal.Notifications.addEventListener('permissionChange', upd);
+      OneSignal.User.PushSubscription.addEventListener('change', upd);
     }
   });
 </script>

@@ -9,25 +9,40 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
- window.OneSignalDeferred = window.OneSignalDeferred || [];
-OneSignalDeferred.push(async function(OneSignal) {
-  await OneSignal.init({
-    appId: "e0bce331-a09e-4bb2-a8bd-002f106fc210",
-    safari_web_id: "web.onesignal.auto.48d27e8c-5bf0-4f8f-a083-e09c208eb2cb",
-  serviceWorkerPath: "/hospital-form/sw.js",
-serviceWorkerParam: { scope: "/hospital-form/" },
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function (OneSignal) {
+    const btn = document.getElementById('notif');
+    let ready = false, initErr = '';
+
+    btn.onclick = async () => {
+      if (!ready) return alert('Push not ready: ' + (initErr || 'still loading'));
+      if (Notification.permission === 'denied')
+        return alert('Notifications are blocked for this site in browser/phone settings');
+      try {
+        await OneSignal.Notifications.requestPermission();
+      } catch (e) {
+        alert('Error: ' + (e && e.message ? e.message : e));
+      }
+    };
+
+    try {
+      await OneSignal.init({
+        appId: "e0bce331-a09e-4bb2-a8bd-002f106fc210",
+        safari_web_id: "web.onesignal.auto.48d27e8c-5bf0-4f8f-a083-e09c208eb2cb",
+        serviceWorkerPath: "/hospital-form/sw.js",
+        serviceWorkerParam: { scope: "/hospital-form/" }
+      });
+      ready = true;
+    } catch (e) {
+      initErr = e && e.message ? e.message : String(e);
+    }
+
+    const upd = () => { btn.hidden = OneSignal.Notifications.permission === true; };
+    if (ready) {
+      upd();
+      OneSignal.Notifications.addEventListener('permissionChange', upd);
+    }
   });
-
-  const btn = document.getElementById('notif');
-  if (!btn) return;
-
-  const upd = () => {
-    btn.hidden = OneSignal.Notifications.permission === true;
-  };
-  upd();
-  OneSignal.Notifications.addEventListener('permissionChange', upd);
-  btn.onclick = () => OneSignal.Notifications.requestPermission();
-});
 </script>
 <link rel="preconnect" href="https://script.google.com">
 <link rel="preconnect" href="https://script.googleusercontent.com">

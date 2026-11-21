@@ -22,8 +22,16 @@
         if (Notification.permission !== 'granted')
           await OneSignal.Notifications.requestPermission();
         await OneSignal.User.PushSubscription.optIn();
-       const s = OneSignal.User.PushSubscription;
-alert('optedIn: ' + s.optedIn + '\nid: ' + s.id + '\ntoken: ' + (s.token ? 'yes' : 'NO'));
+      const s = OneSignal.User.PushSubscription;
+for (let i = 0; i < 10 && !s.id; i++) await new Promise(r => setTimeout(r, 1000));
+const reg = await navigator.serviceWorker.getRegistration('/hospital-form/');
+const bsub = (reg && reg.pushManager) ? await reg.pushManager.getSubscription() : null;
+alert(
+  'id: ' + s.id +
+  '\ntoken: ' + (s.token ? 'yes' : 'NO') +
+  '\nSW: ' + (reg ? (reg.active ? 'active' : 'not active') : 'none') +
+  '\nbrowserSub: ' + (bsub ? 'yes' : 'NO')
+);
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));
       }

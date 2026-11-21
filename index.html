@@ -40,8 +40,9 @@ window.addEventListener('unhandledrejection', function (e) {
       if (Notification.permission === 'denied')
         return alert('Notifications are blocked for this site in browser/phone settings');
       try {
-        if (Notification.permission !== 'granted')
-          await OneSignal.Notifications.requestPermission();
+        // Всегда вызываем requestPermission: если разрешение уже дано, запроса не будет,
+        // но именно этот вызов заставляет OneSignal зарегистрировать worker и оформить подписку
+        await OneSignal.Notifications.requestPermission();
         await OneSignal.User.PushSubscription.optIn();
 
         // Диагностика: ждём id подписки (до 10 с) и показываем состояние
@@ -59,7 +60,7 @@ window.addEventListener('unhandledrejection', function (e) {
           '\nbrowserSub: ' + (bsub ? 'yes' : 'NO') +
           '\nperm: ' + Notification.permission +
           '\nregistrations:\n' + rtxt +
-          '\n--- log ---\n' + window.__log.slice(-30).join('\n');
+          '\n--- log ---\n' + window.__log.filter(l => l.indexOf('CoreModuleDirector') < 0).slice(-30).join('\n');
         document.getElementById('dbg').textContent = rep;
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));

@@ -22,7 +22,8 @@
         if (Notification.permission !== 'granted')
           await OneSignal.Notifications.requestPermission();
         await OneSignal.User.PushSubscription.optIn();
-        alert('Subscribed: ' + OneSignal.User.PushSubscription.optedIn);
+       const s = OneSignal.User.PushSubscription;
+alert('optedIn: ' + s.optedIn + '\nid: ' + s.id + '\ntoken: ' + (s.token ? 'yes' : 'NO'));
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));
       }

@@ -22,16 +22,22 @@
         if (Notification.permission !== 'granted')
           await OneSignal.Notifications.requestPermission();
         await OneSignal.User.PushSubscription.optIn();
-      const s = OneSignal.User.PushSubscription;
-for (let i = 0; i < 10 && !s.id; i++) await new Promise(r => setTimeout(r, 1000));
-const reg = await navigator.serviceWorker.getRegistration('/hospital-form/');
-const bsub = (reg && reg.pushManager) ? await reg.pushManager.getSubscription() : null;
-alert(
-  'id: ' + s.id +
-  '\ntoken: ' + (s.token ? 'yes' : 'NO') +
-  '\nSW: ' + (reg ? (reg.active ? 'active' : 'not active') : 'none') +
-  '\nbrowserSub: ' + (bsub ? 'yes' : 'NO')
-);
+
+        // ТЕСТ: пробуем оформить push-подписку напрямую и показываем ошибку браузера
+        let out = 'permission: ' + Notification.permission;
+        try {
+          const reg = await navigator.serviceWorker.getRegistration('/hospital-form/');
+          const key = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
+          const pad = '='.repeat((4 - key.length % 4) % 4);
+          const raw = atob((key + pad).replace(/-/g, '+').replace(/_/g, '/'));
+          const arr = Uint8Array.from(raw, c => c.charCodeAt(0));
+          const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: arr });
+          out += '\nsubscribe: OK';
+          await sub.unsubscribe();
+        } catch (e) {
+          out += '\nsubscribe error: ' + e.name + ': ' + e.message;
+        }
+        alert(out);
       } catch (e) {
         alert('Error: ' + (e && e.message ? e.message : e));
       }
@@ -140,12 +146,13 @@ const err = s => ERR[s] || s;
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('en-US');
 const digits = s => String(s).replace(/\D/g, '');
-const spaced = s => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const spaced = s => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');   // 1000000 -> 1 000 000
 const totalNum = () => Number(digits($('total').value)) || 0;
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 const newRid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+// Бейдж на иконке приложения: число открытых заявок (ещё не собрано полностью)
 function updateBadge(list) {
   try {
     if (!('setAppBadge' in navigator)) return;
@@ -156,19 +163,21 @@ function updateBadge(list) {
 }
 
 let token = lsGet('token');
-let data = null;
-let srv = null;
+let data = null;        // что показываем: серверные данные + неотправленные записи
+let srv = null;         // последние серверные данные
 let busy = false;
-let again = false;
+let again = false;      // после текущей загрузки нужна ещё одна (принудительная)
 let lastLoad = 0;
 let lastJson = '';
 
 function msg(t) { $('msg').textContent = t; }
 
+// Кнопка активна только когда выбраны ник, заявка и введена сумма
 function updateSend() {
   $('send').disabled = !($('player').value && $('recipient').value && totalNum() > 0);
 }
 
+// Формат суммы при вводе: 1 000 000 (курсор не прыгает)
 function fmtTotal() {
   const el = $('total');
   const pos = el.selectionStart == null ? el.value.length : el.selectionStart;
@@ -181,6 +190,7 @@ function fmtTotal() {
   updateSend();
 }
 
+// Черновик: введённая сумма (хранится 30 минут)
 function saveDraft() {
   lsSet('draft', JSON.stringify({ t: $('total').value, ts: Date.now() }));
 }
@@ -192,6 +202,7 @@ function loadDraft() {
   return null;
 }
 
+// Последние суммы с этого устройства: быстрые кнопки под полем суммы
 const getAmts = () => { try { return JSON.parse(lsGet('amts') || '[]'); } catch (e) { return []; } };
 function pushAmt(t) {
   const a = [t].concat(getAmts().filter(x => x !== t)).slice(0, 4);
@@ -210,14 +221,17 @@ function showChips() {
   });
 }
 
+// Фоновое обновление не трогаем, пока вы выбираете в списке или вводите сумму
 function canRefresh() {
   const tag = document.activeElement && document.activeElement.tagName;
   return !(tag === 'SELECT' || tag === 'INPUT');
 }
 
+// ---------- Очередь неотправленных записей (outbox) ----------
 const outbox = () => { try { return JSON.parse(lsGet('outbox') || '[]'); } catch (e) { return []; } };
 const setOutbox = a => lsSet('outbox', JSON.stringify(a));
 
+// Поверх серверных данных показываем то, что ещё не доставлено
 function withPending(d) {
   const q = outbox();
   if (!q.length) return d;
@@ -248,7 +262,7 @@ async function flush() {
       setOutbox(outbox().filter(x => x.rid !== it.rid));
       sent = true;
       if (r.status === 'ok') {
-        api({ action: 'notify', token, rid: it.rid }).catch(() => {});
+        api({ action: 'notify', token, rid: it.rid }).catch(() => {});   // Discord: не ждём
       } else {
         msg('Error: ' + err(r.status) + ' (' + fmt(it.total) + ' → ' + it.recipient + ' was not saved)');
       }
@@ -260,6 +274,7 @@ async function flush() {
   else if (sent && !(document.activeElement && document.activeElement.tagName === 'SELECT')) load(true, true);
 }
 
+// Up to 3 attempts; a unique id (rid) makes repeated save/undo requests safe
 async function api(body) {
   const payload = (body.action === 'undo' && !body.rid) ? { ...body, rid: newRid() } : body;
   let lastErr;
@@ -269,7 +284,7 @@ async function api(body) {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
-        keepalive: true
+        keepalive: true   // браузер доведёт запрос до конца, даже если вкладку закрыли
       });
       const text = await r.text();
       try { return JSON.parse(text); }
@@ -297,6 +312,8 @@ function fillSelect(sel, items, cur, placeholder) {
   sel.value = cur;
 }
 
+// silent = фоновое обновление без надписи «Loading…»
+// force = перерисовать, даже если данные те же (убрать пометки «sending…»), выбранную заявку не сбрасывать
 function load(silent, force) {
   if (!token) return askToken('');
   if (busy) { if (force) again = true; return; }
@@ -310,7 +327,7 @@ function load(silent, force) {
       lastLoad = Date.now();
       if (d.error) return render(d);
       const s = JSON.stringify(d);
-      if (s !== lastJson || force) {
+      if (s !== lastJson || force) {   // перерисовываем, только если данные изменились
         lastJson = s;
         lsSet('formCache', s);
         render(d, force);
@@ -328,7 +345,7 @@ function render(d, keepSel) {
   srv = d;
   data = withPending(d);
   const curP = $('player').value || lsGet('player');
-  const curR = keepSel ? $('recipient').value : '';
+  const curR = keepSel ? $('recipient').value : '';   // по умолчанию всегда выбирать заново
   fillSelect($('player'), data.players.map(n => ({ label: n, value: n })), curP, '— select nickname —');
   fillSelect($('recipient'),
     data.requests.map(r => ({ label: r.name + ' (remaining ' + fmt(Math.max(r.need - r.got, 0)) + ')', value: r.name })),
@@ -336,9 +353,11 @@ function render(d, keepSel) {
   showInfo();
   showChips();
 
+  // цвета заявок: имя -> цвет заливки из таблицы
   const colors = {};
   data.requests.forEach(r => { if (r.color) colors[r.name.trim().toLowerCase()] = r.color; });
 
+  // последние записи: боковая полоска в цвет получателя
   const rc = $('recent'); rc.innerHTML = '';
   if (!data.recent.length) rc.innerHTML = '<div class="small">No entries yet</div>';
   data.recent.forEach(r => {
@@ -351,6 +370,7 @@ function render(d, keepSel) {
     rc.appendChild(div);
   });
 
+  // заявки: полоска прогресса в цвет ячейки
   const rq = $('reqs'); rq.innerHTML = '';
   data.requests.forEach(r => {
     const div = document.createElement('div');
@@ -403,13 +423,14 @@ $('recipient').onchange = () => {
   showInfo();
   saveDraft();
   updateSend();
-  if ($('recipient').value) $('total').focus();
+  if ($('recipient').value) $('total').focus();   // сразу к вводу суммы
 };
 $('total').oninput = () => { fmtTotal(); saveDraft(); };
 $('total').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); $('send').click(); }
+  if (e.key === 'Enter') { e.preventDefault(); $('send').click(); }   // «Готово» на клавиатуре сохраняет
 });
 
+// Сохранение мгновенное: запись попадает в очередь и сразу видна, на сервер уходит в фоне
 $('send').onclick = () => {
   const player = $('player').value, rec = $('recipient').value;
   const total = totalNum();
@@ -424,7 +445,7 @@ $('send').onclick = () => {
 
   msg('Saved: +' + fmt(total) + ' → ' + rec);
   $('total').value = '';
-  $('recipient').value = '';
+  $('recipient').value = '';   // сброс получателя
   saveDraft();
   pushAmt(total);
   if (srv) render(srv); else updateSend();
@@ -442,7 +463,7 @@ $('undo').onclick = () => {
     return;
   }
   armed = false; $('undo').textContent = UNDO_TEXT;
-  if (outbox().length) {
+  if (outbox().length) {   // отмена не должна обгонять ещё не отправленную запись
     msg('Wait until your entries are synced, then try again');
     flush();
     return;
@@ -461,11 +482,13 @@ $('undo').onclick = () => {
     .catch(e => msg('Error: ' + e.message));
 };
 
+// Фоновое обновление раз в минуту
 setInterval(() => {
   if (document.hidden || !token || !canRefresh()) return;
   load(true);
 }, 60000);
 
+// Вернулись на вкладку: досылаем очередь, обновляем данные (если старше 2 минут) и ставим курсор в поле суммы
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !token) return;
   flush();
@@ -473,8 +496,10 @@ document.addEventListener('visibilitychange', () => {
   if ($('recipient').value && !$('total').value && !$('main').hidden) $('total').focus();
 });
 
+// Появилась сеть: досылаем очередь
 window.addEventListener('online', flush);
 
+// Сразу показываем данные прошлого визита и черновик, свежие подгружаются фоном
 showChips();
 if (token) {
   try {
@@ -491,9 +516,10 @@ if (token) {
 }
 updateSend();
 load();
-flush();
+flush();   // досылаем записи, не ушедшие в прошлый раз
 </script>
 <script>
+  // PWA: service worker для установки формы как приложения
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
